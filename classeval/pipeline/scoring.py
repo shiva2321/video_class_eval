@@ -326,6 +326,14 @@ def score(
     ):
         grade = "Insufficient evidence"
 
+    # Gate 3: the language model analysed none of the class, so the word lists alone must not give a top grade
+    if checklist.degraded and "language_unsupported" not in flags and "language_uncertain" not in flags:
+        flags.append("llm_degraded")
+        if grade == "Excellent":
+            grade = "Good"
+    if checklist.chunks_failed:
+        flags.append("partial_analysis")
+
     # Gate 2: Camera-off while tutor speaks >= 50%
     if tutor_speech_s > 0 and (video.camera_off_while_tutor_speaks_s / tutor_speech_s) >= 0.5:
         flags.append("camera_off_high")
@@ -334,7 +342,8 @@ def score(
 
     # Confidence calculation:
     # 0.4*coverage + 0.2*asr_conf + 0.2*tutor_conf + 0.2*(1.0 if not degraded else 0.4)
-    deg_factor = 0.4 if checklist.degraded else 1.0
+    failed_share = checklist.chunks_failed / checklist.chunks_total if checklist.chunks_total else 0.0
+    deg_factor = 0.4 if checklist.degraded else 1.0 - 0.6 * failed_share
     conf = (
         0.4 * coverage
         + 0.2 * tr.language_confidence

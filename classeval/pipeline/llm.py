@@ -13,7 +13,7 @@ class LLMUnavailable(Exception):
 
 
 class LLMBadOutput(Exception):
-    """Raised when Ollama returns invalid JSON or empty output after retry."""
+    """Raised when Ollama returns invalid JSON or empty output after every retry."""
 
 
 class OllamaClient:
@@ -59,11 +59,14 @@ class OllamaClient:
             },
         }
 
-        # Up to 2 attempts (initial + 1 retry on JSON parse failure)
-        max_attempts = 2
+        # The first attempt is deterministic; retries after a bad answer change seed and temperature,
+        # because repeating an identical request at temperature 0 would just repeat the same bad answer.
+        max_attempts = 3
         last_error: Exception | None = None
 
         for attempt in range(max_attempts):
+            if attempt:
+                payload["options"] = {**payload["options"], "seed": 7 + attempt, "temperature": 0.3}
             try:
                 with httpx.Client(
                     base_url=self.base_url,

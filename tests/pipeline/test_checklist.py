@@ -489,3 +489,71 @@ def test_topics_are_collected_cleaned_and_deduplicated():
     ]
     res = reduce_chunks(chunks, [(0.0, 480.0)] * 4, tr, tutor="S0")
     assert res.topics == ["Forks and double attacks", "Practice puzzles with [Name]"]
+
+
+def _long_class(minutes: int = 22):
+    from classeval.schema import Diarization, Segment, Transcript, TranscriptFacts
+
+    segs = [Segment(start=m * 60.0, end=m * 60.0 + 20, text="Let us look at the next position together", speaker="T") for m in range(minutes)]
+    tr = Transcript(language="en", language_confidence=0.99, asr_model="t", segments=segs)
+    d = Diarization(turns=[], tutor="T", tutor_confidence=1.0, method="ecapa", n_speakers=2)
+    facts = TranscriptFacts(detections={}, distinct_responders=0, question_reply_rate=None, question_count=0)
+    return tr, d, facts
+
+
+class _ScriptedLLM:
+    """Answers each call from a script: a dict is a good answer, an exception class is raised."""
+
+    def __init__(self, script):
+        self.script, self.calls = list(script), 0
+
+    def chat_json(self, *args, **kwargs):
+        step = self.script[self.calls] if self.calls < len(self.script) else self.script[-1]
+        self.calls += 1
+        if isinstance(step, type) and issubclass(step, Exception):
+            raise step("scripted")
+        return step
+
+
+GOOD_CHUNK = {"topic": "Forks and pins", "items": [], "strengths": [], "improvements": []}
+
+
+def test_one_unusable_chunk_does_not_discard_the_others(settings):
+    from classeval.pipeline.checklist import extract
+    from classeval.pipeline.llm import LLMBadOutput
+
+    tr, d, facts = _long_class()
+    llm = _ScriptedLLM([GOOD_CHUNK, LLMBadOutput, GOOD_CHUNK])
+    res = extract(tr, d, facts, llm, settings)
+    assert (res.chunks_total, res.chunks_failed) == (3, 1)
+    assert not res.degraded and res.topics == ["Forks and pins"]
+
+
+def test_every_chunk_failing_falls_back_to_word_lists(settings):
+    from classeval.pipeline.checklist import extract
+    from classeval.pipeline.llm import LLMBadOutput
+
+    tr, d, facts = _long_class()
+    res = extract(tr, d, facts, _ScriptedLLM([LLMBadOutput]), settings)
+    assert res.degraded and res.chunks_failed == 0
+
+
+def test_an_unavailable_model_is_not_called_again_for_the_remaining_chunks(settings):
+    from classeval.pipeline.checklist import extract
+    from classeval.pipeline.llm import LLMUnavailable
+
+    tr, d, facts = _long_class()
+    llm = _ScriptedLLM([GOOD_CHUNK, LLMUnavailable])
+    res = extract(tr, d, facts, llm, settings)
+    assert llm.calls == 2 and (res.chunks_total, res.chunks_failed) == (3, 2)
+
+
+def test_a_failed_closing_chunk_leaves_the_conclusion_unobserved(settings):
+    from classeval.pipeline.checklist import extract
+    from classeval.pipeline.llm import LLMBadOutput
+
+    tr, d, facts = _long_class()
+    closing = {"dimension": "R11", "verdict": "met", "reason": "Closed the class", "evidence": []}
+    llm = _ScriptedLLM([{**GOOD_CHUNK, "items": [closing]}, {**GOOD_CHUNK, "items": [closing]}, LLMBadOutput])
+    res = extract(tr, d, facts, llm, settings)
+    assert res.items["R11"].verdict == "not_observed"  # only the last chunk may speak for the conclusion

@@ -66,8 +66,12 @@ def summarize(result: ScoreResult, checklist: ChecklistResult) -> str:
         flags_str = ", ".join(result.flags)
         summary_parts.append(f"Technical flags noted: {flags_str}.")
 
-    if checklist.degraded:
-        summary_parts.append("Note: Evaluated using rule-based fallback signals (LLM degraded mode).")
+    if checklist.degraded and "llm_degraded" in result.flags:
+        summary_parts.append("Note: the language model could not analyse this class, so the grade rests on word-list signals only and is capped at Good.")
+    elif checklist.chunks_failed:
+        summary_parts.append(
+            f"Note: {checklist.chunks_failed} of {checklist.chunks_total} sections of the class could not be analysed in depth; confidence is lowered."
+        )
 
     return " ".join(summary_parts)
 

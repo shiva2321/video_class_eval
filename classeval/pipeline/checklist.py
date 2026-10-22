@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any, Literal
 
@@ -17,6 +18,8 @@ from classeval.schema import (
     TranscriptFacts,
 )
 
+logger = logging.getLogger("classeval.checklist")
+
 CHECKLIST_DIMS: list[DimId] = ["R4", "R5", "R6", "R7", "R9", "R10", "R11"]
 
 
@@ -32,7 +35,9 @@ class ChecklistResult(BaseModel):
     strengths: list[Observation] = Field(default_factory=list)
     improvements: list[Observation] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)  # what the class covered, one short phrase per section
-    degraded: bool = False
+    degraded: bool = False  # the whole checklist came from word lists instead of the language model
+    chunks_total: int = 0
+    chunks_failed: int = 0  # sections of the class the language model could not analyse
 
 
 SYSTEM_PROMPT = """You assess one chunk of an online class for children (any subject, for example chess), taught by a tutor to several students.
@@ -566,16 +571,25 @@ def extract(
         return _fallback_from_tfacts(tfacts, tr, d)
 
     chunk_evals: list[dict[str, Any]] = []
-    chunk_times: list[tuple[float, float]] = []
+    chunk_times: list[tuple[float, float]] = [(t0, t1) for t0, t1, _ in chunks]
+    service_down = False
 
-    for i, (t0, t1, text) in enumerate(chunks):
-        chunk_times.append((t0, t1))
+    for i, (_, _, text) in enumerate(chunks):
+        chunk_evals.append({})  # an empty answer keeps the chunk's position so "opening" and "closing" stay correct
+        if service_down:
+            continue
         prompt = build_chunk_prompt(text, chunk_index=i, total_chunks=len(chunks))
         try:
-            chunk_res = llm.chat_json(SYSTEM_PROMPT, prompt, schema=CHECKLIST_SCHEMA)
-            chunk_evals.append(chunk_res)
-        except (LLMUnavailable, LLMBadOutput):
-            # Fall back to transcript rules if LLM fails
-            return _fallback_from_tfacts(tfacts, tr, d)
+            chunk_evals[i] = llm.chat_json(SYSTEM_PROMPT, prompt, schema=CHECKLIST_SCHEMA)
+        except LLMBadOutput:
+            logger.warning("chunk %d/%d: the model gave no usable answer", i + 1, len(chunks))
+        except LLMUnavailable:
+            logger.warning("the model is unavailable; skipping the remaining chunks")
+            service_down = True
 
-    return reduce_chunks(chunk_evals, chunk_times, tr, tutor=d.tutor)
+    failed = sum(1 for ev in chunk_evals if not ev)
+    if failed == len(chunks):  # nothing was analysed: use the word lists, flagged as degraded
+        return _fallback_from_tfacts(tfacts, tr, d)
+    result = reduce_chunks(chunk_evals, chunk_times, tr, tutor=d.tutor)
+    result.chunks_total, result.chunks_failed = len(chunks), failed
+    return result

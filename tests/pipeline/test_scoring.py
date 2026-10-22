@@ -277,3 +277,28 @@ def test_audio_dropouts_are_not_penalised(settings):
     scores = lambda res: {d.id: d.score for d in res.dimensions}
     assert scores(base)["R3"] == scores(many)["R3"]
     assert scores(base)["R12"] == scores(many)["R12"]
+
+
+def _force_top_grade(settings):
+    settings.cutoffs.poor_lt = settings.cutoffs.average_lt = settings.cutoffs.good_lt = 0.0
+    return settings
+
+
+def test_a_degraded_checklist_cannot_give_an_excellent_grade(settings):
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs(degraded=True)
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, _force_top_grade(settings))
+    assert res.grade == "Good" and "llm_degraded" in res.flags
+
+
+def test_an_intact_checklist_can_still_be_excellent(settings):
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs()
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, _force_top_grade(settings))
+    assert res.grade == "Excellent" and "llm_degraded" not in res.flags
+
+
+def test_unanalysed_sections_lower_the_confidence_and_are_flagged(settings):
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs()
+    base = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
+    checklist.chunks_total, checklist.chunks_failed = 4, 2
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
+    assert "partial_analysis" in res.flags and res.confidence < base.confidence

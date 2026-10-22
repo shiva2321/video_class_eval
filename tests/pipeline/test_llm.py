@@ -46,7 +46,7 @@ def test_chat_json_sends_schema_and_zero_temperature():
     assert captured_request["options"]["num_ctx"] == 16384
 
 
-def test_invalid_json_twice_raises_bad_output():
+def test_invalid_json_on_every_attempt_raises_bad_output():
     call_count = 0
 
     def mock_handler(request: httpx.Request) -> httpx.Response:
@@ -72,8 +72,23 @@ def test_invalid_json_twice_raises_bad_output():
     with pytest.raises(LLMBadOutput):
         client.chat_json("sys", "user", schema={"type": "object"})
 
-    # Exactly one retry -> 2 total calls
-    assert call_count == 2
+    assert call_count == 3  # the first attempt and two retries
+
+
+def test_a_retry_changes_seed_and_temperature_and_can_recover():
+    seen: list[dict] = []
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        seen.append(_json.loads(request.content)["options"])
+        content = "not json {" if len(seen) == 1 else '{"ok": true}'
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": content}})
+
+    client = OllamaClient(base_url="http://mock-ollama:11434", model="m", transport=httpx.MockTransport(mock_handler))
+    assert client.chat_json("sys", "user", schema={"type": "object"}) == {"ok": True}
+    assert (seen[0]["seed"], seen[0]["temperature"]) == (7, 0)
+    assert seen[1]["seed"] != seen[0]["seed"] and seen[1]["temperature"] > 0
 
 
 def test_timeout_raises_unavailable():
