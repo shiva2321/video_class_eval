@@ -112,11 +112,14 @@ def _clean(text: str, limit: int) -> str:
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
-def _sentence_is_grounded(sentence: str, facts: str, known: list[float]) -> bool:
+_WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
+
+
+def _sentence_is_grounded(sentence: str, words: set[str], known: list[float]) -> bool:
     """Numbers must be facts (to rounding for numbers of ten and over, exactly below) and a capitalised name-like word
-    must already appear in the facts (dimension names do; a person's name does not)."""
-    lowered = facts.lower()
-    if any(name.lower() not in lowered for name in find_names(sentence)):
+    must be a whole word of the facts (dimension names are; a person's name is not, even when it happens to be part of
+    a longer fact word)."""
+    if any(name.lower() not in words for name in find_names(sentence)):
         return False
     return all(any(abs(n - k) <= (0.51 if n >= 10 else 0.051) for k in known) for n in _numbers(sentence))
 
@@ -124,7 +127,8 @@ def _sentence_is_grounded(sentence: str, facts: str, known: list[float]) -> bool
 def grounded(text: str, facts: str) -> str:
     """Only the sentences of `text` whose numbers and names are facts."""
     known = _numbers(facts)
-    return " ".join(x for x in _SENTENCE.split(text) if x and _sentence_is_grounded(x, facts, known))
+    words = {w.lower() for w in _WORD.findall(facts)}
+    return " ".join(x for x in _SENTENCE.split(text) if x and _sentence_is_grounded(x, words, known))
 
 
 def _default_headline(rep: Report) -> str:

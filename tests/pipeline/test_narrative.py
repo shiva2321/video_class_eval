@@ -143,6 +143,13 @@ def test_a_sentence_naming_a_person_is_removed(settings):
     assert out is not None and out.why == "Students answered quickly."
 
 
+def test_a_name_that_is_only_part_of_a_fact_word_is_still_a_name(settings):
+    rep = _report(settings)
+    assert "rapport" in narrative.fact_sheet(rep).lower()  # "Rap" is a substring of it, but not a word of the facts
+    out = narrative.generate(rep, Client({**GOOD, "why": "Students answered quickly. Ask Rap to share one move."}))
+    assert out is not None and out.why == "Students answered quickly."
+
+
 def test_dimension_names_are_not_mistaken_for_people(settings):
     rep = _report(settings)
     ok = {**GOOD, "why": "The Opening and rapport dimension was strong, but Student participation lost points."}
