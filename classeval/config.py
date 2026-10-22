@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -57,6 +58,33 @@ class PathsConfig(BaseModel):
     uploads_dir: Path = Path("uploads")
 
 
+class AsrConfig(BaseModel):
+    device: str = "cuda"
+    compute_type: str = "int8_float16"
+    batch_size: int = 8
+    beam_size: int = 5
+    vad_filter: bool = True
+    language_windows: int = 5
+    language_window_s: float = 30.0
+
+
+class DiarizationConfig(BaseModel):
+    prefer: Literal["pyannote", "ecapa"] = "pyannote"
+    ecapa_window_s: float = 1.5
+    ecapa_hop_s: float = 0.75
+    ecapa_merge_gap_s: float = 0.5
+
+
+class ScreenStateConfig(BaseModel):
+    flat_card_luma_range: tuple[float, float] = (20.0, 40.0)
+    flat_card_std_max: float = 8.0
+    flat_card_pixel_share: float = 0.92
+    logo_match_threshold: float = 0.6
+    logo_scales: list[float] = Field(default_factory=lambda: [0.35, 0.5, 0.7, 1.0, 1.4, 1.6])
+    clip_batch_size: int = 32
+    clip_prompts: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     models: ModelsConfig
     ollama: OllamaConfig
@@ -68,6 +96,9 @@ class Settings(BaseModel):
     lexicon: LexiconConfig
     scoring: dict[str, list[float]]
     paths: PathsConfig
+    asr: AsrConfig = Field(default_factory=AsrConfig)
+    diarization: DiarizationConfig = Field(default_factory=DiarizationConfig)
+    screen_state: ScreenStateConfig = Field(default_factory=ScreenStateConfig)
 
     access_code: SecretStr
     hf_token: SecretStr | None = None

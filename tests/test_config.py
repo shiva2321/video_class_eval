@@ -69,6 +69,37 @@ def test_scoring_keys_and_ranges(monkeypatch):
         assert all(isinstance(x, (int, float)) for x in v), f"Key {k} contains non-numeric values"
 
 
+def test_stage_sections_load_from_yaml(monkeypatch):
+    monkeypatch.setenv("ACCESS_CODE", "testcode123")
+    settings = load_settings("config.yaml", env_file=None)
+    assert settings.asr.compute_type == "int8_float16"
+    assert settings.asr.language_windows == 5
+    assert settings.diarization.prefer == "pyannote"
+    assert settings.screen_state.flat_card_luma_range == (20.0, 40.0)
+    assert settings.screen_state.logo_scales[0] == 0.35 and settings.screen_state.logo_scales[-1] == 1.6
+    assert set(settings.screen_state.clip_prompts) == {
+        "BOARD_SHARE",
+        "LESSON_VIDEO_SHARE",
+        "OTHER_TALKING_HEAD",
+        "OTHER_SHARE",
+    }
+
+
+def test_stage_sections_have_defaults_when_missing_from_yaml(tmp_path, monkeypatch):
+    import yaml
+
+    monkeypatch.setenv("ACCESS_CODE", "testcode123")
+    data = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    for key in ("asr", "diarization", "screen_state"):
+        data.pop(key)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
+    settings = load_settings(cfg, env_file=None)
+    assert settings.asr.batch_size == 8
+    assert settings.diarization.ecapa_hop_s == 0.75
+    assert settings.screen_state.clip_prompts == {}
+
+
 def test_env_override(monkeypatch):
     monkeypatch.setenv("ACCESS_CODE", "secret_token_val")
     monkeypatch.setenv("HF_TOKEN", "hf_secret_123")
