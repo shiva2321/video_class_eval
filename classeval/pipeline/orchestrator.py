@@ -32,6 +32,9 @@ from classeval.pipeline import (
     ingest as ingest_mod,
 )
 from classeval.pipeline import (
+    narrative as narrative_mod,
+)
+from classeval.pipeline import (
     report as report_mod,
 )
 from classeval.pipeline import (
@@ -48,6 +51,9 @@ from classeval.pipeline import (
 )
 from classeval.pipeline import (
     video_features as video_features_mod,
+)
+from classeval.pipeline import (
+    visual as visual_mod,
 )
 from classeval.pipeline.checklist import ChecklistResult
 from classeval.pipeline.ingest import IngestError, Prepared
@@ -79,6 +85,8 @@ class StageFns:
     audio: Callable[..., Any] = audio_features_mod.compute
     video: Callable[..., Any] = video_features_mod.compute
     thumbnail: Callable[..., Any] = thumbnail_mod.branded_share
+    visual: Callable[..., Any] = visual_mod.analyze
+    narrative: Callable[..., Any] = narrative_mod.generate
     tfacts: Callable[..., Any] = transcript_features_mod.compute
     understand: Callable[..., Any] = checklist_mod.extract
     score: Callable[..., Any] = scoring_mod.score
@@ -228,6 +236,9 @@ def execute_pipeline(
             video_facts = fns.video(frame_states, d, tr, settings, frames=prepared.frames)
             n_crops, share = fns.thumbnail(input_path, job_dir / "work", settings)
             video_facts = video_facts.model_copy(update={"thumb_crops": n_crops, "thumb_branded_share": share})
+            client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+            seen = fns.visual(input_path, job_dir / "work", frame_states, d, prepared.frames, settings, client)
+            video_facts = video_facts.model_copy(update=seen)  # the model stays loaded for the next stage
         else:
             video_facts = VideoFacts(
                 states=[],
@@ -319,6 +330,15 @@ def execute_pipeline(
     rep.stats = class_stats_mod.compute(
         tr, d, audio_facts, video_facts, tfacts, prepared.info, text_supported=text_checks_supported(tr, settings)
     )
+    client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+    try:
+        rep.narrative = fns.narrative(rep, client)
+    finally:
+        try:
+            client.unload()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Ollama unload error: %s", exc)
+        _clean_gpu(fns.cleanup_gpu)
     html_content = fns.report_render(rep)
     timings_s["report"] = round(time.monotonic() - t0, 2)
 

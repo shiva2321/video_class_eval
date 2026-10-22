@@ -146,6 +146,9 @@ class VideoFacts(BaseModel):
     n_frames: int
     thumb_branded_share: float | None = None  # share of sampled moments with the backdrop in the tutor's top-right tile
     thumb_crops: int = 0
+    tutor_visible_ratio: float | None = None  # share of sampled tutor-speaking moments with the face clearly visible
+    tutor_lighting_good_ratio: float | None = None  # of the moments the tutor was on camera, share with good light
+    visual_samples: int = 0
 
 
 class TranscriptFacts(BaseModel):
@@ -236,6 +239,14 @@ class ClassStats(BaseModel):
     interaction: InteractionStats | None = None
 
 
+class Narrative(BaseModel):
+    """Short written explanation of the grade, produced by the local model from the report's own facts."""
+
+    headline: str
+    why: str
+    improve: str
+
+
 class Report(BaseModel):
     job_id: str
     created_at: str
@@ -258,3 +269,4 @@ class Report(BaseModel):
     versions: dict[str, str] = Field(default_factory=dict)
     stats: ClassStats | None = None
     topics: list[str] = Field(default_factory=list)
+    narrative: Narrative | None = None

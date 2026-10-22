@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from classeval.pipeline.checklist import ChecklistResult
 from classeval.pipeline.class_stats import screen_group
+from classeval.pipeline.narrative import points_lost
 from classeval.pipeline.scoring import ScoreResult
 from classeval.schema import (
     AudioFacts,
@@ -243,6 +244,34 @@ def _render_interaction(it: InteractionStats | None) -> str:
     )
 
 
+def _render_explanation(report: Report) -> str:
+    """Why this grade: the model-written explanation (when it passed the checks) and the points each dimension cost."""
+    blocks = []
+    n = report.narrative
+    if n is not None:
+        blocks.append(
+            f'<p class="why-head">{html.escape(n.headline)}</p>'
+            f'<div class="summary-text">{html.escape(n.why)}</div>'
+            f'<div class="tl-label">What would raise it</div><div class="summary-text">{html.escape(n.improve)}</div>'
+            '<div class="fine">Written by the local language model from the facts in this report only; '
+            "every number in it is one of them.</div>"
+        )
+    lost = [(d, p) for d, p in points_lost(report.dimensions) if p >= 1.0][:5]
+    if lost:
+        rows = "".join(
+            f"<tr><td>{html.escape(d.name)}</td><td>{d.score:.0f} / 100</td><td>{d.weight:g}</td><td>{p:.1f}</td></tr>"
+            for d, p in lost
+        )
+        blocks.append(
+            '<div class="tl-label">What held the score back (points of 100 lost)</div>'
+            "<table><thead><tr><th>Dimension</th><th>Score</th><th>Weight</th><th>Points lost</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        )
+    if not blocks:
+        return ""
+    return '<div class="section"><div class="section-title">Why this grade</div>' + "".join(blocks) + "</div>"
+
+
 def _render_glance(stats: ClassStats | None, topics: list[str]) -> str:
     """The 'Class at a glance' section: countable facts, two minute-by-minute strips and the topics covered."""
     if stats is None:
@@ -428,6 +457,8 @@ def render_html(report: Report) -> str:
     .section {{ padding: 24px 32px; border-bottom: 1px solid #f1f5f9; }}
     .section-title {{ font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }}
     .summary-text {{ font-size: 15px; color: #334155; line-height: 1.6; }}
+    .why-head {{ font-size: 17px; font-weight: 600; color: #0f172a; line-height: 1.5; margin-bottom: 8px; }}
+    .fine {{ font-size: 12px; color: #64748b; margin-top: 10px; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
     th {{ text-align: left; padding: 10px 12px; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0; }}
     td {{ padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }}
@@ -488,6 +519,7 @@ def render_html(report: Report) -> str:
       </div>
     </div>
 
+    {_render_explanation(report)}
     <div class="section">
       <div class="section-title">Executive Summary</div>
       <div class="summary-text">{html.escape(report.summary)}</div>

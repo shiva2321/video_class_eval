@@ -95,6 +95,8 @@ class ScreenStateConfig(BaseModel):
     thumb_logo_threshold: float = 0.56  # best score without the backdrop stays below ~0.52, with it above ~0.6
     thumb_present_share: float = 0.15  # the backdrop counts as shown when it appears in this share of the moments
     thumb_min_crops: int = 5
+    visual_samples: int = 16  # tutor-speaking moments shown to the vision model
+    visual_min_samples: int = 4
 
 
 class LanguagesConfig(BaseModel):

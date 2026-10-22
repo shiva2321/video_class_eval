@@ -55,6 +55,10 @@ class ScoreResult(BaseModel):
 # seeing the ten labelled classes (first-speech time ranked them almost perfectly): treat it as exploratory.
 START_FULL_S = 30.0
 START_ZERO_S = 180.0
+# Camera: the tutor's face counts as shown when clearly visible in at least 60 % of the sampled moments they spoke,
+# and not at all below 10 %.
+VISIBLE_NONE = 0.1
+VISIBLE_FULL = 0.6
 PROVISIONAL_COVERAGE = 0.8  # below this share of the rubric assessed, the top grade is not awarded
 START_WEIGHT = 0.4  # share of R4 that comes from the start time when the opening was also judged from the words
 
@@ -132,10 +136,23 @@ def score(
             dim_evidence["R1"] = _measure("8x8 backdrop visible on " + " and ".join(parts))
 
     # R2: Camera Presence & Lighting
-    dim_sources["R2"] = ["video:camera_off_while_tutor_speaks_s", "video:talking_head_luma_mean"]
+    dim_sources["R2"] = ["video:tutor_visible_ratio", "video:camera_off_while_tutor_speaks_s", "video:talking_head_luma_mean"]
+    looked = video.visual_samples >= settings.screen_state.visual_min_samples and video.tutor_visible_ratio is not None
     if not has_video:
         dim_scores["R2"] = None
         dim_notes["R2"] = "No video in this recording"
+    elif looked and video.tutor_visible_ratio is not None:
+        # A vision model looked at the tutor's video at moments when the tutor was speaking.
+        visible = video.tutor_visible_ratio
+        r2_val = 100.0 * _norm(visible, VISIBLE_NONE, VISIBLE_FULL)
+        light = video.tutor_lighting_good_ratio
+        if light is not None and light < 0.5:
+            r2_val *= 0.8
+        dim_scores["R2"] = r2_val
+        detail = f"The tutor's face was clearly visible in {visible:.0%} of {video.visual_samples} sampled moments when they spoke"
+        if light is not None:
+            detail += f"; the light was good in {light:.0%} of the moments they were on camera"
+        dim_evidence["R2"] = _measure(detail)
     else:
         denom = max(1.0, 0.25 * tutor_speech_s)
         cam_ratio = min(1.0, video.camera_off_while_tutor_speaks_s / denom)

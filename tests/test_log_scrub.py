@@ -215,6 +215,8 @@ def test_log_scrub_child_sentinel_never_logged_or_persisted(
         audio=lambda *a, **k: _make_dummy_audio_facts(),
         video=lambda states, d, tr, s, frames=None: _make_dummy_video_facts(n_frames=len(states)),
         thumbnail=lambda *a, **k: (0, None),
+        visual=lambda *a, **k: {},
+        narrative=lambda *a, **k: None,
         tfacts=lambda *a, **k: _make_dummy_tfacts(),
         understand=lambda *a, **k: _make_dummy_checklist(),
         score=lambda *a, **k: _make_dummy_scoring(),
