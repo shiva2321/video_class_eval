@@ -2,6 +2,7 @@ import json
 import re
 import secrets
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -10,6 +11,8 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 # The client's file name is display metadata only and is never used as an on-disk name.
 FINAL_NAME = "upload.bin"
 _TMP_NAME = "upload.tmp"
+IDLE_CLAIM_S = 900.0  # an upload untouched for this long stops holding disk space (it can still resume)
+MAX_OPEN_UPLOADS = 6  # unfinished, recently active uploads allowed at once
 
 
 class InsufficientDiskSpace(HTTPException):
@@ -61,27 +64,39 @@ class UploadStore:
             raise FileNotFoundError("Upload not found")
         return up_dir
 
-    def _unfinished_claim(self) -> int:
-        """Disk that uploads already in progress still need (3x their size, minus what they have stored), so many
-        concurrent uploads cannot each pass the free-space check on their own and then fill the disk together."""
-        claim = 0
+    def _open_uploads(self) -> list[tuple[int, int]]:
+        """(declared size, stored bytes) of unfinished uploads that were active within IDLE_CLAIM_S."""
+        now = time.time()
+        found: list[tuple[int, int]] = []
         for meta_path in self.root.glob("*/meta.json"):
             up_dir = meta_path.parent
             if (up_dir / FINAL_NAME).exists():
                 continue
             try:
+                parts = list(up_dir.glob("chunk_*.part"))
+                newest = max([meta_path.stat().st_mtime, *(p.stat().st_mtime for p in parts)])
+                if now - newest > IDLE_CLAIM_S:
+                    continue  # idle: holds nothing, so an abandoned upload cannot block the disk for long
                 declared = int(json.loads(meta_path.read_text(encoding="utf-8"))["size"])
-                stored = sum(p.stat().st_size for p in up_dir.glob("chunk_*.part"))
+                found.append((declared, sum(p.stat().st_size for p in parts)))
             except (OSError, ValueError, KeyError):
                 continue  # an unreadable upload folder claims nothing; the purge job removes it later
-            claim += max(0, 3 * declared - stored)
-        return claim
+        return found
+
+    def _unfinished_claim(self) -> int:
+        """Disk that active uploads still need (3x their size, minus what they have stored), so many concurrent
+        uploads cannot each pass the free-space check on their own and then fill the disk together."""
+        return sum(max(0, 3 * declared - stored) for declared, stored in self._open_uploads())
 
     def init(self, size: int, filename: str) -> str:
         if size > self.max_bytes:
             raise UploadTooLarge(f"Size {size} exceeds limit of {self.max_bytes} bytes")
 
-        if shutil.disk_usage(self.root).free - self._unfinished_claim() < 3 * size:
+        open_uploads = self._open_uploads()
+        if len(open_uploads) >= MAX_OPEN_UPLOADS:
+            raise InsufficientDiskSpace("Too many uploads are in progress. Please try again in a few minutes.")
+        claim = sum(max(0, 3 * declared - stored) for declared, stored in open_uploads)
+        if shutil.disk_usage(self.root).free - claim < 3 * size:
             raise InsufficientDiskSpace("Not enough free disk space on the server.")
 
         upload_id = secrets.token_urlsafe(16)

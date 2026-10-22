@@ -68,3 +68,27 @@ def test_completing_needs_room_for_the_joined_file(monkeypatch, tmp_path):
     _free(monkeypatch, 2)
     with pytest.raises(InsufficientDiskSpace):
         store.complete(upload_id)
+
+
+def test_an_idle_upload_stops_claiming_space_but_can_still_resume(monkeypatch, tmp_path):
+    import os
+    import time
+
+    store = _store(tmp_path)
+    _free(monkeypatch, 10 * GB)
+    upload_id = store.init(size=2 * GB, filename="a.mp4")
+    assert store._unfinished_claim() == 6 * GB
+    old = time.time() - uploads.IDLE_CLAIM_S - 60
+    os.utime(store.root / upload_id / "meta.json", (old, old))
+    assert store._unfinished_claim() == 0
+    store.put_chunk(upload_id, 0, b"1234")  # still accepted, and it becomes active again
+    assert store._unfinished_claim() > 0
+
+
+def test_the_number_of_active_unfinished_uploads_is_capped(monkeypatch, tmp_path):
+    store = _store(tmp_path)
+    _free(monkeypatch, 1000 * GB)
+    for _ in range(uploads.MAX_OPEN_UPLOADS):
+        store.init(size=1024, filename="a.mp4")
+    with pytest.raises(InsufficientDiskSpace):
+        store.init(size=1024, filename="a.mp4")
