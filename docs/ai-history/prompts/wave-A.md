@@ -1,0 +1,7 @@
+# Prompt: Wave A (Task 0 + Task 1) — to Gemini via Antigravity
+Issued by: Claude (planner). Date: 2026-10-22. Contains no recording content.
+Revised after the first attempt: commits are made by the planner and the human only (Truthgate guard is the human's own and is not to be touched by any agent).
+
+```
+Workspace is F:\Eval_class\video_class_eval (only this folder). Read GEMINI.md, then docs/superpowers/plans/2026-10-22-class-quality-assessor.md: the sections "Global Constraints", "Review Focus", "Task 0" and "Task 1". Execute Task 0 then Task 1, in order, following each step literally (write the test -> run it and see it fail -> implement -> run it and see it pass -> report). Do not stage, commit or tag anything and never touch git hooks or the Truthgate kit: skip every "Commit" step and list the changed files in your REPORT. Obey the data firewall in GEMINI.md: do not open anything outside this folder, never read or print .env, never push. If a step cannot be done as written (for example a package conflict, a model tag that does not exist, or a gated model you cannot access), choose the smallest workaround, note it under "deviations" in your report, and keep going; if an interface owned by another task would have to change, stop and report instead. Finish with the REPORT block defined in GEMINI.md, and include the JSON printed by scripts/gpu_smoke.py and the final pinned versions of torch, faster-whisper, pyannote.audio, transformers, opencv-python-headless and fastapi.
+```
