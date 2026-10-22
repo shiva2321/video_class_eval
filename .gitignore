@@ -64,7 +64,9 @@ cache/
 tmp/
 temp/
 outputs/
-results/
+# numbers-only summaries of the evaluation, speed and robustness runs are kept; anything else here is not
+results/*
+!results/*.json
 frames/
 transcripts/
 features/

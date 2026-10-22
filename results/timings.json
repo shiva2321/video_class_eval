@@ -1,0 +1,32 @@
+{
+  "runs": [
+    {
+      "recording_minutes": 56.0,
+      "stages_s": {
+        "ingest": 23.66,
+        "asr": 40.3,
+        "diarize": 6.34,
+        "audio": 9.2,
+        "video": 26.84,
+        "understand": 71.45,
+        "score": 0.0
+      },
+      "total_s": 177.8,
+      "minutes_of_recording_per_minute_of_processing": 18.9
+    },
+    {
+      "recording_minutes": 44.1,
+      "stages_s": {
+        "ingest": 19.33,
+        "asr": 33.83,
+        "diarize": 5.31,
+        "audio": 6.17,
+        "video": 31.92,
+        "understand": 63.64,
+        "score": 0.0
+      },
+      "total_s": 160.2,
+      "minutes_of_recording_per_minute_of_processing": 16.5
+    }
+  ]
+}

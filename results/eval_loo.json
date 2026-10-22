@@ -1,0 +1,90 @@
+{
+  "mode": "leave_one_out_fit",
+  "labelled_classes": 8,
+  "soft_labelled_classes": 2,
+  "exact": 0.375,
+  "within_one": 0.875,
+  "kendall_tau": 0.7715,
+  "confusion_rows_true_cols_predicted": [
+    [
+      0,
+      1,
+      1,
+      0
+    ],
+    [
+      1,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0,
+      1
+    ],
+    [
+      0,
+      0,
+      0,
+      2
+    ]
+  ],
+  "soft_classes_at_or_below_average": 2,
+  "cutoffs": {
+    "poor_lt": 69.0,
+    "average_lt": 74.0,
+    "good_lt": 78.0
+  },
+  "dimension_agreement": {
+    "R1": {
+      "classes": 8,
+      "agreement": 1.0
+    },
+    "R2": {
+      "classes": 3,
+      "agreement": 0.6667
+    },
+    "R3": {
+      "classes": 2,
+      "agreement": 0.0
+    },
+    "R4": {
+      "classes": 6,
+      "agreement": 0.5
+    },
+    "R5": {
+      "classes": 1,
+      "agreement": 0.0
+    },
+    "R6": {
+      "classes": 7,
+      "agreement": 0.4286
+    },
+    "R7": {
+      "classes": 5,
+      "agreement": 0.0
+    },
+    "R8": {
+      "classes": 0,
+      "agreement": 0.0
+    },
+    "R9": {
+      "classes": 2,
+      "agreement": 1.0
+    },
+    "R10": {
+      "classes": 5,
+      "agreement": 0.8
+    },
+    "R11": {
+      "classes": 1,
+      "agreement": 1.0
+    },
+    "R12": {
+      "classes": 0,
+      "agreement": 0.0
+    }
+  }
+}

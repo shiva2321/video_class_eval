@@ -1,0 +1,34 @@
+{
+  "what": "three videos from the internet that are not classes (different resolutions and lengths); the pipeline had to run on each without error",
+  "runs": [
+    {
+      "video_height_px": 720,
+      "minutes": 9.4,
+      "language_detected": "en",
+      "grade": "Insufficient evidence",
+      "rubric_coverage": 0.95,
+      "wall_seconds": 56,
+      "flags": []
+    },
+    {
+      "video_height_px": 480,
+      "minutes": 11.5,
+      "language_detected": "hi",
+      "grade": "Poor",
+      "rubric_coverage": 0.7,
+      "wall_seconds": 74,
+      "flags": [
+        "language_unsupported"
+      ]
+    },
+    {
+      "video_height_px": 360,
+      "minutes": 6.2,
+      "language_detected": "en",
+      "grade": "Insufficient evidence",
+      "rubric_coverage": 0.95,
+      "wall_seconds": 62,
+      "flags": []
+    }
+  ]
+}

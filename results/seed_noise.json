@@ -1,0 +1,33 @@
+{
+  "what": "overall score of the same class under three sampling seeds of the language model (7, 11, 23)",
+  "classes": 4,
+  "score_by_seed_7_11_23": [
+    [
+      76.3,
+      77.0,
+      77.0
+    ],
+    [
+      69.3,
+      69.3,
+      69.3
+    ],
+    [
+      77.3,
+      80.3,
+      80.3
+    ],
+    [
+      83.3,
+      83.3,
+      83.3
+    ]
+  ],
+  "spread_max_minus_min": [
+    0.7,
+    0.0,
+    3.0,
+    0.0
+  ],
+  "largest_spread": 3.0
+}
