@@ -26,50 +26,74 @@ def app(settings):
 
 
 @pytest.mark.asyncio
-async def test_job_stub_flow_stages_in_order(app, settings):
+async def test_job_stub_flow_stages_in_order(app, settings, monkeypatch):
+    """A job walks through the stages and ends with a valid report (pipeline faked, upload real)."""
+    from classeval.schema import MediaInfo
+
     transport = ASGITransport(app=app)
     headers = {"X-Access-Code": "correct_token_123"}
     store = JobStore(settings.paths.jobs_dir)
+    stage_names = ["ingest", "asr", "diarize", "audio", "video", "understand", "score", "report"]
+    seen: list[str] = []
+
+    def fake_execute(input_path, job_dir, settings, stages=None, job_id="x", store=None):
+        for idx, stage in enumerate(stage_names):
+            store.set_stage(job_id, stage, (idx + 1) / len(stage_names))
+            seen.append(stage)
+        media = MediaInfo(duration_s=30.0, has_audio=True, has_video=True, container="mp4", size_bytes=3)
+        rep = Report(
+            job_id=job_id,
+            created_at="2026-10-22T00:00:00+00:00",
+            media=media,
+            language="en",
+            language_confidence=0.9,
+            grade="Insufficient evidence",
+            confidence=0.5,
+            coverage=0.0,
+            summary="fake pipeline",
+            degraded=False,
+        )
+        (job_dir / "report.json").write_text(rep.model_dump_json(), encoding="utf-8")
+        (job_dir / "report.html").write_text("<!doctype html><html><body>Report</body></html>", encoding="utf-8")
+        return rep
+
+    monkeypatch.setattr(orchestrator, "execute_pipeline", fake_execute)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Create job
-        resp = await client.post(
-            "/api/jobs",
-            json={"type": "upload", "upload_id": "test_up_1234567890123"},
-            headers=headers,
-        )
+        init = await client.post("/api/uploads", json={"size": 3, "filename": "a.mp4"}, headers=headers)
+        upload_id = init.json()["upload_id"]
+        await client.put(f"/api/uploads/{upload_id}/chunks/0", content=b"abc", headers=headers)
+        await client.post(f"/api/uploads/{upload_id}/complete", headers=headers)
+
+        resp = await client.post("/api/jobs", json={"type": "upload", "upload_id": upload_id}, headers=headers)
         assert resp.status_code == 200
         job_id = resp.json()["job_id"]
         assert len(job_id) >= 22
 
-        # Check initial state
         resp = await client.get(f"/api/jobs/{job_id}", headers=headers)
-        assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
 
-        # Run orchestrator stub
         orchestrator.run(job_id, store, settings)
+        assert seen == stage_names
 
-        # Job is now done
         resp = await client.get(f"/api/jobs/{job_id}", headers=headers)
-        assert resp.status_code == 200
         job_data = resp.json()
         assert job_data["status"] == "done"
         assert job_data["stage"] == "done"
         assert job_data["progress"] == 1.0
 
-        # Validate report.json against Report pydantic model
         resp = await client.get(f"/api/jobs/{job_id}/report.json", headers=headers)
         assert resp.status_code == 200
         report = Report.model_validate(resp.json())
         assert report.job_id == job_id
         assert report.grade == "Insufficient evidence"
 
-        # Validate report.html returns HTML content
         resp = await client.get(f"/api/jobs/{job_id}/report.html", headers=headers)
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "<html" in resp.text.lower()
+
+    assert not (settings.paths.uploads_dir / upload_id).exists()  # the recording is deleted when the job ends
 
 
 @pytest.mark.asyncio
