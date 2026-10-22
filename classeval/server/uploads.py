@@ -61,11 +61,27 @@ class UploadStore:
             raise FileNotFoundError("Upload not found")
         return up_dir
 
+    def _unfinished_claim(self) -> int:
+        """Disk that uploads already in progress still need (3x their size, minus what they have stored), so many
+        concurrent uploads cannot each pass the free-space check on their own and then fill the disk together."""
+        claim = 0
+        for meta_path in self.root.glob("*/meta.json"):
+            up_dir = meta_path.parent
+            if (up_dir / FINAL_NAME).exists():
+                continue
+            try:
+                declared = int(json.loads(meta_path.read_text(encoding="utf-8"))["size"])
+                stored = sum(p.stat().st_size for p in up_dir.glob("chunk_*.part"))
+            except (OSError, ValueError, KeyError):
+                continue  # an unreadable upload folder claims nothing; the purge job removes it later
+            claim += max(0, 3 * declared - stored)
+        return claim
+
     def init(self, size: int, filename: str) -> str:
         if size > self.max_bytes:
             raise UploadTooLarge(f"Size {size} exceeds limit of {self.max_bytes} bytes")
 
-        if shutil.disk_usage(self.root).free < 3 * size:
+        if shutil.disk_usage(self.root).free - self._unfinished_claim() < 3 * size:
             raise InsufficientDiskSpace("Not enough free disk space on the server.")
 
         upload_id = secrets.token_urlsafe(16)
@@ -102,6 +118,8 @@ class UploadStore:
 
         chunk_path = up_dir / f"chunk_{index}.part"
         tmp_path = up_dir / f"chunk_{index}.tmp"
+        if shutil.disk_usage(self.root).free < 2 * len(data):
+            raise InsufficientDiskSpace("Not enough free disk space on the server.")
         tmp_path.write_bytes(data)
         tmp_path.replace(chunk_path)
 
@@ -120,7 +138,10 @@ class UploadStore:
         if missing_indices:
             raise MissingChunks(missing_indices)
 
-        total_chunks = self._meta(upload_id)["total_chunks"]
+        meta = self._meta(upload_id)
+        total_chunks = meta["total_chunks"]
+        if shutil.disk_usage(self.root).free < int(meta["size"]):  # joining the chunks needs room for a second copy
+            raise InsufficientDiskSpace("Not enough free disk space on the server.")
         tmp_target = up_dir / _TMP_NAME
 
         with open(tmp_target, "wb") as outfile:

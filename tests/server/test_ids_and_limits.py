@@ -116,3 +116,19 @@ async def test_rate_limit_uses_last_forwarded_entry_behind_local_proxy(monkeypat
         other = await client.get("/api/jobs/nonexistent_id_000000", headers={**HEADERS, "X-Forwarded-For": "3.3.3.3, 8.8.8.8"})
     assert blocked.status_code == 429
     assert other.status_code != 429
+
+
+def test_an_upload_of_zero_or_negative_size_is_rejected(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from classeval.config import load_settings
+    from classeval.server.main import create_app
+
+    monkeypatch.setenv("ACCESS_CODE", "test_size_guard_token")
+    settings = load_settings("config.yaml", env_file=None)
+    settings.paths.jobs_dir = tmp_path / "jobs"
+    settings.paths.uploads_dir = tmp_path / "uploads"
+    client = TestClient(create_app(settings))
+    for size in (0, -5):
+        resp = client.post("/api/uploads", json={"size": size, "filename": "a.mp4"}, headers={"X-Access-Code": "test_size_guard_token"})
+        assert resp.status_code == 422

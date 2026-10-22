@@ -28,7 +28,7 @@ logger = logging.getLogger("classeval.server")
 
 
 class InitUploadRequest(BaseModel):
-    size: int
+    size: int = Field(gt=0)
     filename: str
 
 
