@@ -400,7 +400,8 @@ def render_html(report: Report) -> str:
     lang_notice = ""
     if "language_unsupported" in report.technical_flags:
         lang_notice = (
-            f'<div class="section notice">Language notice: this class was mostly in {html.escape(_language_name(report.language))}. '
+            f'<div class="section notice">Language notice: this class was mostly not in English (the language detector reported '
+            f'{html.escape(_language_name(report.language))}; it can confuse closely related languages). '
             "Transcript-based checks (opening, introductions, homework, conclusion and similar) are validated for English "
             "only, so they are marked not assessed instead of guessed. Everything that does not depend on language "
             "(talk time, participation, pace, screen use, audio) is still measured and shown below.</div>"
