@@ -27,6 +27,7 @@ def parse_vtt(path: Path) -> list[tuple[float, float, str | None, str]]:
         r"((?:\d{1,2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d{1,2}:)?\d{2}:\d{2}\.\d{3})"
     )
     speaker_pattern = re.compile(r"<v\s+([^>]+)>(.*)")
+    colon_pattern = re.compile(r"^([^:<>]{1,40}):\s+(.*)$")
 
     while i < len(lines):
         line = lines[i].strip()
@@ -46,6 +47,12 @@ def parse_vtt(path: Path) -> list[tuple[float, float, str | None, str]]:
             if sp_match:
                 speaker = sp_match.group(1).strip()
                 full_text = sp_match.group(2).strip()
+            else:
+                # The platform's own transcripts write "Speaker Name: text"
+                colon_match = colon_pattern.match(full_text)
+                if colon_match:
+                    speaker = colon_match.group(1).strip()
+                    full_text = colon_match.group(2).strip()
 
             # Strip any remaining HTML-like tags
             clean_text = re.sub(r"<[^>]+>", "", full_text).strip()

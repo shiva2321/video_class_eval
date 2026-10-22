@@ -269,3 +269,11 @@ def test_checklist_reason_becomes_the_dimension_note(settings):
     res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
     by_id = {x.id: x for x in res.dimensions}
     assert by_id["R4"].note == "Greeted the children warmly before starting."
+
+
+def test_audio_dropouts_are_not_penalised(settings):
+    base = scoring.score(*_make_dummy_inputs(), settings, )
+    many = scoring.score(*_make_dummy_inputs(dropouts=[(10.0, 13.0)] * 40), settings)
+    scores = lambda res: {d.id: d.score for d in res.dimensions}
+    assert scores(base)["R3"] == scores(many)["R3"]
+    assert scores(base)["R12"] == scores(many)["R12"]

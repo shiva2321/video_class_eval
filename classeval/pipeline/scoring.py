@@ -134,11 +134,11 @@ def score(
         r3_val -= 20.0
     if audio.snr_db_est < 15.0:
         r3_val -= 20.0
-    r3_val -= min(40.0, 10.0 * len(audio.dropouts))
+    # Digital silences ("dropouts") are NOT penalised: real meeting recordings contain many during normal pauses.
     dim_scores["R3"] = max(0.0, min(100.0, r3_val))
     dim_evidence["R3"] = _measure(
         f"Loudness {audio.loudness_lufs:.0f} LUFS, clipping {audio.clipping_ratio:.1%}, "
-        f"signal-to-noise about {audio.snr_db_est:.0f} dB, {len(audio.dropouts)} audio dropouts"
+        f"signal-to-noise about {audio.snr_db_est:.0f} dB"
     )
 
     # Pedagogical items from checklist
@@ -251,12 +251,12 @@ def score(
     # R12: Technical Stability
     dim_sources["R12"] = ["audio:dropouts", "video:camera_off_total_ratio"]
     cam_penalty = 30.0 if has_video and video.camera_off_total_ratio > 0.5 else 0.0
-    r12_val = 100.0 - 15.0 * len(audio.dropouts) - cam_penalty
+    r12_val = 100.0 - cam_penalty
     dim_scores["R12"] = max(0.0, min(100.0, r12_val))
     dim_evidence["R12"] = _measure(
-        f"{len(audio.dropouts)} audio dropouts; camera off in {video.camera_off_total_ratio:.0%} of sampled frames"
+        f"Camera off in {video.camera_off_total_ratio:.0%} of sampled frames"
         if has_video
-        else f"{len(audio.dropouts)} audio dropouts"
+        else "No video track to check"
     )
 
     reasons = {k: v.reason for k, v in checklist.items.items() if v.reason}

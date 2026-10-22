@@ -77,7 +77,11 @@ def build_report(
 ) -> Report:
     """Assemble final validated Report object."""
     not_assessed = [d_score.id for d_score in result.dimensions if d_score.score is None]
-    downweighted_signals = ["praise_density (weight 0)"]
+    downweighted_signals = [
+        "praise-word count (weight 0: weak classes use praise words as much as strong ones)",
+        "audio dropouts (weight 0: recorded meetings contain many digital silences during normal pauses)",
+        "recording length and bitrate (not related to teaching quality)",
+    ]
 
     return Report(
         job_id=job_id,

@@ -140,3 +140,93 @@ def test_embeddings_are_computed_in_bounded_batches(monkeypatch, tmp_path):
     diarize_mod.diarize(tmp_path / "long.wav", settings)
 
     assert len(sizes) > 1 and max(sizes) <= diarize_mod.EMBED_BATCH
+
+
+def test_assign_speakers_recuts_a_long_segment_at_speaker_changes():
+    from classeval.pipeline.diarize import assign_speakers
+    from classeval.schema import Diarization, Segment, SpeakerTurn, Transcript, Word
+
+    texts = ["Hello", "everyone", "how", "are", "you", "today", "Knight", "to", "e5", "said", "the", "student"]
+    words = [Word(start=i * 0.5, end=i * 0.5 + 0.4, text=f" {t}", prob=0.9) for i, t in enumerate(texts)]
+    seg = Segment(start=0.0, end=6.0, text=" ".join(texts), words=words)
+    tr = Transcript(language="en", language_confidence=0.9, asr_model="t", segments=[seg])
+    d = Diarization(
+        turns=[SpeakerTurn(start=0.0, end=3.0, speaker="S0"), SpeakerTurn(start=3.0, end=6.0, speaker="S1")],
+        tutor="S0",
+        tutor_confidence=1.0,
+        method="ecapa",
+        n_speakers=2,
+    )
+    out = assign_speakers(tr, d).segments
+    assert [(s.speaker, s.text) for s in out] == [
+        ("S0", "Hello everyone how are you today"),
+        ("S1", "Knight to e5 said the student"),
+    ]
+
+
+def test_assign_speakers_absorbs_a_one_word_speaker_flicker():
+    from classeval.pipeline.diarize import assign_speakers
+    from classeval.schema import Diarization, Segment, SpeakerTurn, Transcript, Word
+
+    texts = ["please", "look", "at", "the", "board", "now", "and", "tell", "me"]
+    words = [Word(start=i * 0.4, end=i * 0.4 + 0.3, text=t, prob=0.9) for i, t in enumerate(texts)]
+    tr = Transcript(
+        language="en",
+        language_confidence=0.9,
+        asr_model="t",
+        segments=[Segment(start=0.0, end=3.6, text=" ".join(texts), words=words)],
+    )
+    d = Diarization(
+        turns=[
+            SpeakerTurn(start=0.0, end=1.5, speaker="S0"),
+            SpeakerTurn(start=1.5, end=1.9, speaker="S1"),  # a single flickering word
+            SpeakerTurn(start=1.9, end=3.6, speaker="S0"),
+        ],
+        tutor="S0",
+        tutor_confidence=1.0,
+        method="ecapa",
+        n_speakers=2,
+    )
+    out = assign_speakers(tr, d).segments
+    assert len(out) == 1 and out[0].speaker == "S0"
+
+
+def test_turns_tile_the_timeline_without_overlap():
+    import numpy as np
+    import pytest
+
+    from classeval.pipeline.diarize import turns_from_labels
+
+    turns = turns_from_labels(np.array([0.0, 0.75, 1.5, 2.25, 3.0]), np.array([0, 0, 1, 1, 1]))
+    assert len(turns) == 2
+    assert turns[0].end <= turns[1].start + 1e-9
+    assert sum(t.end - t.start for t in turns) == pytest.approx(5 * 0.75)  # each window owns exactly 0.75 s
+
+
+def test_tutor_confidence_needs_a_real_share_of_the_speech():
+    from classeval.pipeline.diarize import identify_tutor
+    from classeval.schema import SpeakerTurn
+
+    turns = [SpeakerTurn(start=i * 10, end=i * 10 + 3, speaker=f"S{i}") for i in range(30)]
+    turns[0] = SpeakerTurn(start=0, end=4, speaker="S0")
+    tutor, conf = identify_tutor(turns)
+    assert tutor == "S0" and conf < 0.2  # a "dominant" speaker with a tiny share means the clustering failed
+
+
+def test_small_clusters_are_folded_into_the_large_ones():
+    import numpy as np
+
+    from classeval.pipeline.diarize import cluster_windows
+
+    rng = np.random.default_rng(0)
+    a, b = rng.normal(size=16), rng.normal(size=16)
+    emb = np.vstack(
+        [
+            a + 0.05 * rng.normal(size=(100, 16)),
+            b + 0.05 * rng.normal(size=(100, 16)),
+            rng.normal(size=(3, 16)),
+        ]
+    )
+    emb /= np.linalg.norm(emb, axis=1, keepdims=True)
+    labels = cluster_windows(emb, threshold=0.3, min_share=0.05, smooth=0)
+    assert len(set(labels.tolist())) == 2

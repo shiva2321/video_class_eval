@@ -73,6 +73,9 @@ class DiarizationConfig(BaseModel):
     ecapa_window_s: float = 1.5
     ecapa_hop_s: float = 0.75
     ecapa_merge_gap_s: float = 0.5
+    distance_threshold: float = 0.7
+    min_cluster_share: float = 0.05
+    smooth_windows: int = 2
 
 
 class ScreenStateConfig(BaseModel):

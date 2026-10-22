@@ -104,6 +104,9 @@ diarization:
   ecapa_window_s: 1.5
   ecapa_hop_s: 0.75
   ecapa_merge_gap_s: 0.5
+  distance_threshold: 0.7
+  min_cluster_share: 0.05
+  smooth_windows: 2
 
 screen_state:
   flat_card_luma_range: [20, 40]

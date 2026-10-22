@@ -33,3 +33,21 @@ def test_vtt_parse_and_wer(tmp_path):
     assert cues[1][1] == 6.2
     assert cues[1][2] == "Student"
     assert cues[1][3] == "Hi sir."
+
+
+def test_parse_vtt_understands_the_platforms_plain_speaker_prefix(tmp_path):
+    from classeval.eval.vtt import parse_vtt
+
+    vtt = tmp_path / "t.vtt"
+    vtt.write_text(
+        "WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\nTutor One: Hello everyone.\n\n"
+        "2\n00:00:03.000 --> 00:00:04.000\nStudent A: Hi teacher!\n\n"
+        "3\n00:00:05.000 --> 00:00:06.000\nNo speaker prefix here\n",
+        encoding="utf-8",
+    )
+    cues = parse_vtt(vtt)
+    assert [(c[2], c[3]) for c in cues] == [
+        ("Tutor One", "Hello everyone."),
+        ("Student A", "Hi teacher!"),
+        (None, "No speaker prefix here"),
+    ]
