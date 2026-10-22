@@ -1,12 +1,56 @@
+import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 import wave
 from pathlib import Path
 
 
+def speech_backend() -> str | None:
+    """The text-to-speech engine of this machine: Windows SAPI, macOS `say` or Linux espeak-ng / espeak."""
+    if sys.platform == "win32":
+        return "sapi"
+    if sys.platform == "darwin" and shutil.which("say"):
+        return "say"
+    for name in ("espeak-ng", "espeak"):
+        if shutil.which(name):
+            return name
+    return None
+
+
+def _convert_to_16k_mono(src: Path, dst: Path) -> None:
+    res = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(src), "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(dst)],
+        check=False, capture_output=True, text=True, timeout=30.0,
+    )  # fmt: skip
+    if res.returncode != 0:
+        raise RuntimeError(f"ffmpeg conversion failed: {res.stderr.strip()}")
+
+
+def _speak_with_command(backend: str, text: str, path: Path) -> Path:
+    suffix = ".aiff" if backend == "say" else ".wav"
+    tmp = Path(tempfile.gettempdir()) / f"synth_{uuid.uuid4().hex}{suffix}"
+    cmd = ["say", "-o", str(tmp), text] if backend == "say" else [backend, "-w", str(tmp), text]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60.0, check=False)
+        if res.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+            raise RuntimeError(f"Speech synthesis with {backend} failed: {res.stderr.strip()}")
+        _convert_to_16k_mono(tmp, path)
+        return path
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def make_speech_wav(text: str, path: Path, voice: str = "David") -> Path:
-    """Generate speech WAV using Windows SAPI (System.Speech) and convert to 16kHz mono."""
+    """Generate speech as a 16 kHz mono WAV with this machine's text-to-speech engine (the test is skipped without one)."""
+    backend = speech_backend()
+    if backend is None:
+        import pytest
+
+        pytest.skip("no text-to-speech engine here (Windows SAPI, macOS say, or espeak-ng)")
+    if backend != "sapi":
+        return _speak_with_command(backend, text, Path(path).resolve())
     path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -53,16 +97,8 @@ $synth.Dispose()
             raise RuntimeError(f"Speech synthesis failed: {res.stderr.strip()}")
 
         # Standardize to 16kHz mono PCM
-        import shutil
-
-        ffmpeg_bin = "ffmpeg"
-        if not shutil.which("ffmpeg"):
-            candidate = Path(r"F:\tools\ffmpeg\bin\ffmpeg.exe")
-            if candidate.exists():
-                ffmpeg_bin = str(candidate)
-
         convert_cmd = [
-            ffmpeg_bin,
+            "ffmpeg",
             "-y",
             "-i",
             str(tmp_wav),

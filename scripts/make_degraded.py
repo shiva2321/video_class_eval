@@ -1,24 +1,13 @@
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
 def _get_ffmpeg() -> str:
-    if shutil.which("ffmpeg"):
-        return "ffmpeg"
-    candidate = Path(r"F:\tools\ffmpeg\bin\ffmpeg.exe")
-    if candidate.exists():
-        return str(candidate)
     return "ffmpeg"
 
 
 def _get_ffprobe() -> str:
-    if shutil.which("ffprobe"):
-        return "ffprobe"
-    candidate = Path(r"F:\tools\ffmpeg\bin\ffprobe.exe")
-    if candidate.exists():
-        return str(candidate)
     return "ffprobe"
 
 
@@ -42,7 +31,7 @@ def probe_duration(path: Path) -> float:
 
 
 def make_degraded(input_path: Path, out_dir: Path, kind: str) -> Path:
-    """Create a degraded media file (mute5, black, or trunc5min)."""
+    """Create a degraded or changed copy: mute5, black, trunc5min, scale720, scale480 or first20."""
     input_path = input_path.resolve()
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -106,6 +95,16 @@ def make_degraded(input_path: Path, out_dir: Path, kind: str) -> Path:
             str(out_path),
         ]
 
+    elif kind in ("scale720", "scale480"):
+        height = 720 if kind == "scale720" else 480
+        cmd = [
+            ffmpeg_bin, "-y", "-i", str(input_path), "-vf", f"scale=-2:{height}",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p", "-c:a", "copy", str(out_path),
+        ]  # fmt: skip
+
+    elif kind == "first20":
+        cmd = [ffmpeg_bin, "-y", "-i", str(input_path), "-t", "1200", "-c", "copy", str(out_path)]
+
     else:
         raise ValueError(f"Unknown degradation kind: {kind}")
 
@@ -117,9 +116,36 @@ def make_degraded(input_path: Path, out_dir: Path, kind: str) -> Path:
     return out_path
 
 
+def make_long(inputs: list[Path], out_dir: Path, name: str = "long_concat") -> Path:
+    """Join recordings with identical codecs into one long recording (tests length scaling without new data)."""
+    import tempfile
+
+    out_dir = Path(out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{name}.mp4"
+    with tempfile.TemporaryDirectory() as tmp:
+        listing = Path(tmp) / "list.txt"
+        lines = [f"file '{Path(p).resolve().as_posix()}'" for p in inputs]
+        listing.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        cmd = [_get_ffmpeg(), "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(out_path)]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=1800.0, check=False)
+    if res.returncode != 0 or not out_path.exists():
+        raise RuntimeError(f"FFmpeg concat failed: {res.stderr}")
+    return out_path
+
+
 def main() -> None:
+    if len(sys.argv) >= 5 and sys.argv[1] == "concat":
+        try:
+            print(f"OK {make_long([Path(p) for p in sys.argv[3:]], Path(sys.argv[2])).name}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"FAIL {exc}")
+            sys.exit(1)
+        return
+
     if len(sys.argv) < 4:
         print("Usage: python scripts/make_degraded.py <input> <out_dir> <kind>")
+        print("       python scripts/make_degraded.py concat <out_dir> <recording> <recording> ...")
         sys.exit(1)
 
     input_file = Path(sys.argv[1])

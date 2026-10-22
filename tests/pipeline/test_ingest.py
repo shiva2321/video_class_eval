@@ -46,7 +46,7 @@ def test_audio_only_has_no_frames(tmp_path, settings):
 
     job_dir = tmp_path / "job_audio"
     prepared = ingest.prepare(clip, job_dir, settings)
-    assert prepared.frames == []
+    assert prepared.frames == [] and prepared.tiles == []
     assert prepared.wav is not None
     assert prepared.wav.exists()
 
@@ -141,3 +141,19 @@ def test_variable_frame_rate_clip_ok(tmp_path, settings):
     job_dir = tmp_path / "job_vfr"
     prepared = ingest.prepare(clip, job_dir, settings)
     assert prepared.info.duration_s > 0
+
+
+def test_the_tutors_tile_is_cut_out_in_the_same_pass_at_native_resolution(tmp_path, settings):
+    import cv2
+
+    clip = tmp_path / "test_tiles.mp4"
+    make_clip(clip, seconds=60.0)
+    prepared = ingest.prepare(clip, tmp_path / "job_tiles", settings)
+    cfg = settings.screen_state
+    assert abs(len(prepared.tiles) - 60.0 / cfg.tile_every_s) <= 1
+    for i, tile in enumerate(prepared.tiles):
+        assert tile.path.exists() and abs(tile.t - i * cfg.tile_every_s) < 0.01
+    full = prepared.info.width, prepared.info.height
+    h, w = cv2.imread(str(prepared.tiles[0].path)).shape[:2]
+    _, _, tw, th = cfg.thumb_region
+    assert abs(w - full[0] * tw) <= 2 and abs(h - full[1] * th) <= 2  # a crop of the original, not of the scaled frame

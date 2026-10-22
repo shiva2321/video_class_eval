@@ -75,7 +75,7 @@ def classify_frames(frames: list[FrameRef], settings: Settings) -> list[FrameSta
     clip_indices: list[int] = []
 
     # Load 8x8 logo template
-    logo_path = Path("assets/8x8_logo_left8.png")
+    logo_path = Path(__file__).resolve().parents[2] / "assets" / "8x8_logo_left8.png"
     template_gray = None
     if logo_path.exists():
         template_bgr = cv2.imread(str(logo_path))

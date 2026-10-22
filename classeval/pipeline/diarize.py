@@ -129,7 +129,7 @@ def embed_windows(wav: Path, settings: Settings) -> tuple[np.ndarray, np.ndarray
     classifier = EncoderClassifier.from_hparams(
         source=settings.models.ecapa,
         run_opts={"device": device},
-        savedir=".cache/ecapa",
+        savedir=str(Path(__file__).resolve().parents[2] / ".cache" / "ecapa"),
     )
     try:
         audio, sr = sf.read(str(Path(wav).resolve()), dtype="float32")

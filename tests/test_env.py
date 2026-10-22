@@ -24,7 +24,6 @@ def test_imports():
     import httpx
     import librosa
     import parselmouth
-    import pyannote.audio
     import pydantic
     import pyloudnorm
     import rapidfuzz
@@ -39,7 +38,6 @@ def test_imports():
     assert librosa is not None
     assert pyloudnorm is not None
     assert parselmouth is not None
-    assert pyannote.audio is not None
     assert transformers is not None
     assert fastapi is not None
     assert httpx is not None
@@ -47,6 +45,13 @@ def test_imports():
     assert _yaml is not None
     assert rapidfuzz is not None
     assert speechbrain is not None
+
+
+def test_the_unused_speaker_diarization_package_is_not_installed():
+    """pyannote was evaluated and dropped (it breaks with the pinned huggingface-hub); voices are clustered with ECAPA."""
+    import importlib.util
+
+    assert importlib.util.find_spec("pyannote") is None
 
 
 def test_config_has_model_names():

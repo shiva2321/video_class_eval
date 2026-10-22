@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from classeval.config import Settings
 from classeval.schema import FrameRef, MediaInfo
@@ -13,11 +13,10 @@ IngestErrorCode = Literal["unreadable", "no_streams", "too_long", "too_short_zer
 
 
 def _ensure_ffmpeg_path() -> None:
-    """Ensure ffmpeg/ffprobe binary directory is in PATH on Windows."""
-    if os.name == "nt":
-        ffmpeg_bin = Path(r"F:\tools\ffmpeg\bin")
-        if ffmpeg_bin.exists() and str(ffmpeg_bin) not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = str(ffmpeg_bin) + os.pathsep + os.environ.get("PATH", "")
+    """Put the folder named by FFMPEG_DIR (optional) in front of PATH, for a machine where ffmpeg is not on PATH."""
+    extra = os.environ.get("FFMPEG_DIR")
+    if extra and Path(extra).is_dir() and extra not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = extra + os.pathsep + os.environ.get("PATH", "")
 
 
 class IngestError(Exception):
@@ -33,6 +32,7 @@ class Prepared(BaseModel):
     info: MediaInfo
     wav: Path | None
     frames: list[FrameRef]
+    tiles: list[FrameRef] = Field(default_factory=list)  # the tutor's top-right tile at native resolution
 
 
 def probe(path: Path) -> MediaInfo:
@@ -197,24 +197,36 @@ def prepare(src: Path, job_dir: Path, settings: Settings) -> Prepared:
             ) from exc
 
     frames: list[FrameRef] = []
+    tiles: list[FrameRef] = []
     if info.has_video:
         frames_dir = job_dir / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
-        frame_pattern = frames_dir / "frame_%06d.jpg"
+        tiles_dir = job_dir / "tiles"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
         fps = settings.sampling.frame_fps
         width = settings.sampling.frame_width
-        filter_str = f"fps={fps},scale={width}:-2"
+        cfg = settings.screen_state
+        x, y, w, h = cfg.thumb_region
+        tile_filter = f"fps=1/{cfg.tile_every_s:g},crop=iw*{w}:ih*{h}:iw*{x}:ih*{y}"
 
+        # One decode of the video feeds both outputs: the sampled whole frames and the tutor's tile.
         cmd = [
             "ffmpeg",
             "-y",
             "-i",
             str(src),
+            "-an",
             "-vf",
-            filter_str,
+            f"fps={fps},scale={width}:-2",
             "-q:v",
             "3",
-            str(frame_pattern),
+            str(frames_dir / "frame_%06d.jpg"),
+            "-an",
+            "-vf",
+            tile_filter,
+            "-q:v",
+            "3",
+            str(tiles_dir / "tile_%05d.jpg"),
         ]
         try:
             res = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
@@ -231,5 +243,7 @@ def prepare(src: Path, job_dir: Path, settings: Settings) -> Prepared:
         for idx, f_path in enumerate(jpg_files):
             t = float(idx) / fps
             frames.append(FrameRef(t=round(t, 3), path=f_path))
+        for idx, t_path in enumerate(sorted(tiles_dir.glob("tile_*.jpg"))):
+            tiles.append(FrameRef(t=round(idx * cfg.tile_every_s, 3), path=t_path))
 
-    return Prepared(info=info, wav=wav_path, frames=frames)
+    return Prepared(info=info, wav=wav_path, frames=frames, tiles=tiles)

@@ -7,20 +7,16 @@ pictures show. Everything is best effort: when the model is unavailable the dime
 """
 
 import logging
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from classeval.config import Settings
-from classeval.pipeline.ingest import _ensure_ffmpeg_path
 from classeval.pipeline.llm import LLMBadOutput, LLMUnavailable, OllamaClient
 from classeval.schema import Diarization, FrameRef, FrameState
 
 logger = logging.getLogger("classeval.visual")
 
 MIN_TURN_S = 3.0  # only turns long enough that the tile surely shows the speaker
-FFMPEG_TIMEOUT_S = 120.0
 _FULL_FRAME_STATES = {"BRANDED_TALKING_HEAD", "OTHER_TALKING_HEAD"}
 
 SCHEMA: dict[str, Any] = {
@@ -60,21 +56,6 @@ def _nearest(items: list, t: float):
     return min(items, key=lambda x: abs(x.t - t)) if items else None
 
 
-def _tile_crop(video: Path, t: float, out: Path, settings: Settings) -> bytes | None:
-    _ensure_ffmpeg_path()
-    x, y, w, h = settings.screen_state.thumb_region
-    cmd = [
-        "ffmpeg", "-v", "error", "-y", "-ss", f"{t:.1f}", "-i", str(video), "-frames:v", "1",
-        "-vf", f"crop=iw*{w}:ih*{h}:iw*{x}:ih*{y}", "-q:v", "3", str(out),
-    ]  # fmt: skip
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
-        return out.read_bytes()
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.warning("tile crop failed: %s", type(exc).__name__)
-        return None
-
-
 def _ask(client: OllamaClient, image: bytes, prompt: str) -> dict[str, str] | None:
     try:
         answer = client.chat_json(SYSTEM, prompt, SCHEMA, images=[image])
@@ -99,43 +80,38 @@ def summarize(answers: list[dict[str, str]], camera_off: int, min_samples: int) 
 
 
 def analyze(
-    video: Path,
-    work_dir: Path,
     states: list[FrameState],
     d: Diarization,
     frames: list[FrameRef],
+    tiles: list[FrameRef],
     settings: Settings,
     client: OllamaClient,
 ) -> dict[str, Any]:
     cfg = settings.screen_state
-    crops_dir = work_dir / "visual"
-    shutil.rmtree(crops_dir, ignore_errors=True)
-    crops_dir.mkdir(parents=True)
     answers: list[dict[str, str]] = []
     camera_off = 0
-    try:
-        for i, t in enumerate(pick_moments(d, cfg.visual_samples)):
-            state = _nearest(states, t)
-            if state is not None and state.state == "CAMERA_OFF_CARD":
-                camera_off += 1
-                continue
-            frame = _nearest(frames, t) if state is not None and state.state in _FULL_FRAME_STATES else None
-            if frame is not None:
-                image, prompt = Path(frame.path).read_bytes(), PROMPT_FULL
-            else:
-                image, prompt = _tile_crop(video, t, crops_dir / f"c{i}.jpg", settings), PROMPT_TILE
-            if image is None:
-                continue
-            try:
-                answer = _ask(client, image, prompt)
-            except LLMUnavailable:
-                logger.warning("the vision model is unavailable; skipping the tutor visibility check")
-                return {}
-            if answer is not None:
-                answers.append(answer)
-    except OSError as exc:
-        logger.warning("tutor visibility check failed: %s", type(exc).__name__)
-        return {}
-    finally:
-        shutil.rmtree(crops_dir, ignore_errors=True)
+    for t in pick_moments(d, cfg.visual_samples):
+        state = _nearest(states, t)
+        if state is not None and state.state == "CAMERA_OFF_CARD":
+            camera_off += 1
+            continue
+        frame = _nearest(frames, t) if state is not None and state.state in _FULL_FRAME_STATES else None
+        tile = _nearest(tiles, t)
+        if frame is not None:
+            path, prompt = frame.path, PROMPT_FULL
+        elif tile is not None and abs(tile.t - t) <= cfg.tile_every_s:
+            path, prompt = tile.path, PROMPT_TILE
+        else:
+            continue
+        try:
+            image = Path(path).read_bytes()
+            answer = _ask(client, image, prompt)
+        except OSError as exc:
+            logger.warning("tutor visibility check could not read a picture: %s", type(exc).__name__)
+            continue
+        except LLMUnavailable:
+            logger.warning("the vision model is unavailable; skipping the tutor visibility check")
+            return {}
+        if answer is not None:
+            answers.append(answer)
     return summarize(answers, camera_off, cfg.visual_min_samples)

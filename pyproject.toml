@@ -7,7 +7,6 @@ dependencies = [
     "torch==2.6.0",
     "torchaudio==2.6.0",
     "faster-whisper>=1.1",
-    "pyannote.audio==3.3.2",
     "speechbrain>=1.0",
     "transformers>=4.46",
     "opencv-python-headless>=4.10",
@@ -50,9 +49,10 @@ name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
+# CUDA 12.4 builds on Windows and Linux (they also run on the CPU); macOS has no CUDA and takes the default build.
 [tool.uv.sources]
-torch = { index = "pytorch-cu124" }
-torchaudio = { index = "pytorch-cu124" }
+torch = { index = "pytorch-cu124", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }
+torchaudio = { index = "pytorch-cu124", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

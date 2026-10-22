@@ -557,3 +557,67 @@ def test_a_failed_closing_chunk_leaves_the_conclusion_unobserved(settings):
     llm = _ScriptedLLM([{**GOOD_CHUNK, "items": [closing]}, {**GOOD_CHUNK, "items": [closing]}, LLMBadOutput])
     res = extract(tr, d, facts, llm, settings)
     assert res.items["R11"].verdict == "not_observed"  # only the last chunk may speak for the conclusion
+
+
+def test_each_chunk_is_only_asked_about_the_dimensions_that_can_use_its_answer():
+    from classeval.pipeline.checklist import dims_for_chunk
+
+    times = [(i * 480.0, (i + 1) * 480.0) for i in range(6)]
+    assert dims_for_chunk(0, times) == ["R4", "R5", "R6", "R7", "R9"]  # the opening
+    assert dims_for_chunk(2, times) == ["R5", "R6", "R7", "R9"]  # mid-class
+    assert dims_for_chunk(4, times) == ["R5", "R6", "R7", "R9", "R10"]  # second to last: homework
+    assert dims_for_chunk(5, times) == ["R5", "R6", "R7", "R9", "R10", "R11"]  # the last: homework and conclusion
+    assert dims_for_chunk(0, times[:1]) == ["R4", "R5", "R6", "R7", "R9", "R10", "R11"]  # a short class is all of it
+
+
+def test_the_dimensions_asked_for_are_exactly_those_reduce_chunks_reads():
+    """A verdict outside these sets is thrown away by the reduction, so asking for it would only cost model time."""
+    from classeval.pipeline.checklist import CHECKLIST_DIMS, dims_for_chunk
+
+    times = [(i * 480.0, (i + 1) * 480.0) for i in range(6)]
+    readable = {
+        "R4": {i for i, (t0, _) in enumerate(times) if t0 <= 300.0},
+        "R10": {4, 5},
+        "R11": {5},
+    }
+    for i in range(6):
+        asked = set(dims_for_chunk(i, times))
+        for dim in CHECKLIST_DIMS:
+            if dim in readable:
+                assert (dim in asked) == (i in readable[dim])
+            else:
+                assert dim in asked
+
+
+def test_the_chunk_schema_is_restricted_without_touching_the_shared_one():
+    from classeval.pipeline.checklist import CHECKLIST_SCHEMA, schema_for
+
+    schema = schema_for(["R5", "R6"])
+    props = schema["properties"]
+    assert props["items"]["maxItems"] == 2 and props["items"]["items"]["properties"]["dimension"]["enum"] == ["R5", "R6"]
+    assert props["strengths"]["maxItems"] == 1 and props["improvements"]["maxItems"] == 1
+    assert CHECKLIST_SCHEMA["properties"]["items"]["maxItems"] == 7  # unchanged
+    assert CHECKLIST_SCHEMA["properties"]["strengths"]["maxItems"] == 2
+
+
+def test_the_prompt_names_the_dimensions_to_judge():
+    from classeval.pipeline.checklist import build_chunk_prompt
+
+    assert "Give verdicts only for: R5, R6." in build_chunk_prompt("x", 1, 3, ["R5", "R6"])
+    assert "Give verdicts only" not in build_chunk_prompt("x", 1, 3)
+
+
+def test_extract_sends_each_chunk_its_own_schema(settings):
+    from classeval.pipeline.checklist import extract
+
+    tr, d, facts = _long_class()
+    seen: list[list[str]] = []
+
+    class Spy:
+        def chat_json(self, system, user, schema, images=None):
+            seen.append(schema["properties"]["items"]["items"]["properties"]["dimension"]["enum"])
+            return GOOD_CHUNK
+
+    extract(tr, d, facts, Spy(), settings)
+    assert seen[0][0] == "R4" and "R4" not in seen[1]
+    assert "R11" in seen[-1] and all("R11" not in s for s in seen[:-1])

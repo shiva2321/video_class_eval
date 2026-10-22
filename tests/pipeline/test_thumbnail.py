@@ -1,11 +1,10 @@
-import subprocess
-
 import cv2
 import numpy as np
 import pytest
 
 from classeval.config import load_settings
 from classeval.pipeline import scoring, thumbnail
+from classeval.schema import FrameRef
 from tests.pipeline.test_scoring import _make_dummy_inputs
 
 
@@ -37,28 +36,32 @@ def test_the_logo_is_found_at_a_small_scale_and_absent_from_noise(settings):
     assert thumbnail.best_logo_score(_noise(2), _template(), scales) < settings.screen_state.thumb_logo_threshold
 
 
-def _fake_crops(images):
-    def write(_video, out_dir, _settings):
-        for i, image in enumerate(images):
-            cv2.imwrite(str(out_dir / f"t_{i:05d}.jpg"), image)
-
-    return write
-
-
-def test_share_counts_the_moments_with_the_backdrop_and_cleans_up(monkeypatch, tmp_path, settings):
-    monkeypatch.setattr(thumbnail, "_extract_crops", _fake_crops([_with_logo(1), _noise(2), _with_logo(3), _noise(4)]))
-    n, share = thumbnail.branded_share(tmp_path / "v.mp4", tmp_path, settings)
-    assert (n, share) == (4, 0.5)
-    assert not (tmp_path / "thumbs").exists()
+def _tiles(tmp_path, images, every_s=10.0):
+    refs = []
+    for i, image in enumerate(images):
+        path = tmp_path / f"tile_{i:05d}.jpg"
+        cv2.imwrite(str(path), image)
+        refs.append(FrameRef(t=i * every_s, path=path))
+    return refs
 
 
-def test_a_failing_ffmpeg_gives_no_measurement_instead_of_an_error(monkeypatch, tmp_path, settings):
-    def boom(*_args):
-        raise subprocess.CalledProcessError(1, "ffmpeg")
+def test_share_counts_the_moments_with_the_backdrop(tmp_path, settings):
+    settings.screen_state.tile_every_s = settings.screen_state.thumb_every_s = 10.0  # every tile is looked at
+    tiles = _tiles(tmp_path, [_with_logo(1), _noise(2), _with_logo(3), _noise(4)])
+    assert thumbnail.branded_share(tiles, settings) == (4, 0.5)
 
-    monkeypatch.setattr(thumbnail, "_extract_crops", boom)
-    assert thumbnail.branded_share(tmp_path / "v.mp4", tmp_path, settings) == (0, None)
-    assert not (tmp_path / "thumbs").exists()
+
+def test_only_every_nth_tile_is_looked_at_when_tiles_are_cut_more_often_than_they_are_judged(tmp_path, settings):
+    settings.screen_state.tile_every_s, settings.screen_state.thumb_every_s = 10.0, 20.0
+    tiles = _tiles(tmp_path, [_with_logo(1), _noise(2), _with_logo(3), _noise(4)])
+    assert thumbnail.branded_share(tiles, settings) == (2, 1.0)  # tiles 0 and 2
+
+
+def test_no_tiles_and_unreadable_tiles_give_no_measurement(tmp_path, settings):
+    assert thumbnail.branded_share([], settings) == (0, None)
+    broken = tmp_path / "tile_00000.jpg"
+    broken.write_bytes(b"not an image")
+    assert thumbnail.branded_share([FrameRef(t=0.0, path=broken)], settings) == (0, None)
 
 
 def _r1(settings, **video_fields):

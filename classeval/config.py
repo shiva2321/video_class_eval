@@ -90,7 +90,8 @@ class ScreenStateConfig(BaseModel):
     clip_prompts: dict[str, list[str]] = Field(default_factory=dict)
     # The tutor's tile in the top-right corner while something is shared: (x, y, width, height) as frame fractions.
     thumb_region: tuple[float, float, float, float] = (0.68, 0.0, 0.32, 0.42)
-    thumb_every_s: float = 20.0
+    thumb_every_s: float = 20.0  # the backdrop is looked for in a tile this often
+    tile_every_s: float = 10.0  # the tutor's tile is cut out of the video this often (one pass with the frames)
     thumb_scales: list[float] = Field(default_factory=lambda: [0.08, 0.1, 0.13, 0.17, 0.22, 0.28, 0.35, 0.45])
     thumb_logo_threshold: float = 0.56  # best score without the backdrop stays below ~0.52, with it above ~0.6
     thumb_present_share: float = 0.15  # the backdrop counts as shown when it appears in this share of the moments
@@ -133,6 +134,20 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+def load_config_dict(path: Path | str) -> dict:
+    """The configuration as a dictionary: config.yaml with an untracked config.local.yaml next to it merged over it.
+    (No access code is needed, so setup scripts can read the model names and folders before .env exists.)"""
+    cfg_path = Path(path)
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    # Machine-specific overrides (model folder, ports) live in config.local.yaml.
+    local_path = cfg_path.with_name("config.local.yaml")
+    if local_path.is_file():
+        with open(local_path, "r", encoding="utf-8") as f:
+            data = _merge(data, yaml.safe_load(f) or {})
+    return data
+
+
 def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None = ".env") -> Settings:
     if env_file is not None:
         dotenv_path = Path(env_file)
@@ -143,13 +158,7 @@ def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None 
     if not cfg_path.exists():
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    # Machine-specific overrides (model folder, ports) live in an untracked config.local.yaml next to config.yaml.
-    local_path = cfg_path.with_name("config.local.yaml")
-    if local_path.is_file():
-        with open(local_path, "r", encoding="utf-8") as f:
-            data = _merge(data, yaml.safe_load(f) or {})
+    data = load_config_dict(cfg_path)
 
     raw_access_code = os.environ.get("ACCESS_CODE")
     if not raw_access_code or not raw_access_code.strip():

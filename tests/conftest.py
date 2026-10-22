@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-# Ensure ffmpeg bin is in PATH for all test runs
-ffmpeg_bin = Path(r"F:\tools\ffmpeg\bin")
-if ffmpeg_bin.exists() and str(ffmpeg_bin) not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = str(ffmpeg_bin) + os.pathsep + os.environ.get("PATH", "")
+# A machine where ffmpeg is not on PATH can name its folder in FFMPEG_DIR.
+extra = os.environ.get("FFMPEG_DIR")
+if extra and Path(extra).is_dir() and extra not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = extra + os.pathsep + os.environ.get("PATH", "")

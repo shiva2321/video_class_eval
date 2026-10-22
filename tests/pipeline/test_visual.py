@@ -69,57 +69,65 @@ class FakeClient:
 
 
 def _inputs(tmp_path, state="BOARD_SHARE"):
-    frames, states = [], []
+    frames, states, tiles = [], [], []
     for i in range(0, 420, 5):
         path = tmp_path / f"f{i}.jpg"
-        path.write_bytes(b"jpg")
+        path.write_bytes(b"frame")
         frames.append(FrameRef(t=float(i), path=path))
         states.append(FrameState(t=float(i), state=state, confidence=0.9))
-    return states, frames
+    for i in range(0, 420, 10):
+        path = tmp_path / f"t{i}.jpg"
+        path.write_bytes(b"tile")
+        tiles.append(FrameRef(t=float(i), path=path))
+    return states, frames, tiles
 
 
-def test_camera_off_cards_count_without_asking_the_model(monkeypatch, tmp_path, settings):
-    states, frames = _inputs(tmp_path, state="CAMERA_OFF_CARD")
+def test_camera_off_cards_count_without_asking_the_model(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path, state="CAMERA_OFF_CARD")
     client = FakeClient([ON])
-    out = visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, client)
+    out = visual.analyze(states, _diar(), frames, tiles, settings, client)
     assert client.calls == 0
     assert out["tutor_visible_ratio"] == 0.0 and out["visual_samples"] == 16
 
 
-def test_full_screen_tutor_moments_use_the_whole_frame_and_shared_screens_use_the_tile(monkeypatch, tmp_path, settings):
-    tiles = []
-    monkeypatch.setattr(visual, "_tile_crop", lambda video, t, out, s: tiles.append(t) or b"tile")
-    states, frames = _inputs(tmp_path, state="OTHER_TALKING_HEAD")
+def test_full_screen_tutor_moments_use_the_whole_frame_and_shared_screens_use_the_tile(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path, state="OTHER_TALKING_HEAD")
     client = FakeClient([ON])
-    visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, client)
-    assert tiles == [] and all(img == [b"jpg"] for img in client.images)
+    visual.analyze(states, _diar(), frames, tiles, settings, client)
+    assert client.calls == 16 and all(img == [b"frame"] for img in client.images)
 
-    states, frames = _inputs(tmp_path, state="BOARD_SHARE")
+    states, frames, tiles = _inputs(tmp_path, state="BOARD_SHARE")
     client = FakeClient([ON])
-    visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, client)
-    assert len(tiles) == 16 and all(img == [b"tile"] for img in client.images)
+    visual.analyze(states, _diar(), frames, tiles, settings, client)
+    assert client.calls == 16 and all(img == [b"tile"] for img in client.images)
 
 
-def test_an_unusable_answer_skips_that_moment_and_an_unavailable_model_gives_nothing(monkeypatch, tmp_path, settings):
-    monkeypatch.setattr(visual, "_tile_crop", lambda *a: b"tile")
-    states, frames = _inputs(tmp_path)
-    out = visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, FakeClient([LLMBadOutput, ON]))
+def test_a_moment_without_a_tile_close_enough_is_skipped(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path)
+    far = [FrameRef(t=t.t + 1000.0, path=t.path) for t in tiles]  # no tile near any tutor moment
+    client = FakeClient([ON])
+    assert visual.analyze(states, _diar(), frames, far, settings, client) == {"visual_samples": 0}
+    assert client.calls == 0
+
+
+def test_an_unusable_answer_skips_that_moment_and_an_unavailable_model_gives_nothing(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path)
+    out = visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([LLMBadOutput, ON]))
     assert out["visual_samples"] == 15  # the first moment is skipped, the rest are counted
-    assert visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, FakeClient([LLMUnavailable])) == {}
+    assert visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([LLMUnavailable])) == {}
 
 
-def test_incomplete_answers_are_ignored(monkeypatch, tmp_path, settings):
-    monkeypatch.setattr(visual, "_tile_crop", lambda *a: b"tile")
-    states, frames = _inputs(tmp_path)
-    out = visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, FakeClient([{"shows": "person_on_camera"}]))
+def test_incomplete_answers_are_ignored(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path)
+    out = visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([{"shows": "person_on_camera"}]))
     assert out == {"visual_samples": 0}
 
 
-def test_no_crops_are_left_behind(monkeypatch, tmp_path, settings):
-    monkeypatch.setattr(visual, "_tile_crop", lambda *a: b"tile")
-    states, frames = _inputs(tmp_path)
-    visual.analyze(tmp_path / "v.mp4", tmp_path, states, _diar(), frames, settings, FakeClient([ON]))
-    assert not (tmp_path / "visual").exists()
+def test_an_unreadable_picture_skips_that_moment(tmp_path, settings):
+    states, frames, tiles = _inputs(tmp_path)
+    tiles[0].path.unlink()
+    out = visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([ON]))
+    assert out["visual_samples"] < 16
 
 
 def _r2(settings, **fields):

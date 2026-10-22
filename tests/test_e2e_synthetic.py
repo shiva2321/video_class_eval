@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -24,11 +23,6 @@ def settings(monkeypatch):
 
 
 def _get_ffmpeg() -> str:
-    if shutil.which("ffmpeg"):
-        return "ffmpeg"
-    candidate = Path(r"F:\tools\ffmpeg\bin\ffmpeg.exe")
-    if candidate.exists():
-        return str(candidate)
     return "ffmpeg"
 
 

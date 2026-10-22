@@ -4,21 +4,15 @@ The full-frame checks cannot see that tile, so this module samples it at native 
 8x8 backdrop in it. Crops live only in a scratch directory that is removed before returning.
 """
 
-import logging
-import shutil
-import subprocess
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from classeval.config import Settings
-from classeval.pipeline.ingest import _ensure_ffmpeg_path
-
-logger = logging.getLogger("classeval.thumbnail")
+from classeval.schema import FrameRef
 
 LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "8x8_logo_left8.png"
-FFMPEG_TIMEOUT_S = 3600.0
 
 
 def best_logo_score(gray: np.ndarray, template: np.ndarray, scales: list[float]) -> float:
@@ -32,37 +26,21 @@ def best_logo_score(gray: np.ndarray, template: np.ndarray, scales: list[float])
     return best
 
 
-def _extract_crops(video: Path, out_dir: Path, settings: Settings) -> None:
-    _ensure_ffmpeg_path()
-    cfg = settings.screen_state
-    x, y, w, h = cfg.thumb_region
-    vf = f"fps=1/{cfg.thumb_every_s:g},crop=iw*{w}:ih*{h}:iw*{x}:ih*{y}"
-    cmd = ["ffmpeg", "-v", "error", "-i", str(video), "-an", "-vf", vf, "-q:v", "3", str(out_dir / "t_%05d.jpg")]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
+def branded_share(tiles: list[FrameRef], settings: Settings) -> tuple[int, float | None]:
+    """(number of sampled moments, share of them where the 8x8 backdrop shows in the tutor's tile).
 
-
-def branded_share(video: Path, work_dir: Path, settings: Settings) -> tuple[int, float | None]:
-    """(number of sampled moments, share of them where the 8x8 backdrop shows in the top-right tile)."""
+    The tiles were cut out during ingest; every `thumb_every_s` seconds one is looked at, one image in memory at a time."""
     template_bgr = cv2.imread(str(LOGO_PATH))
-    if template_bgr is None:
+    if template_bgr is None or not tiles:
         return 0, None
     template = cv2.cvtColor(template_bgr, cv2.COLOR_BGR2GRAY)
     cfg = settings.screen_state
-    crops_dir = work_dir / "thumbs"
-    shutil.rmtree(crops_dir, ignore_errors=True)
-    crops_dir.mkdir(parents=True)
+    stride = max(1, round(cfg.thumb_every_s / cfg.tile_every_s))
     n = hits = 0
-    try:
-        _extract_crops(video, crops_dir, settings)
-        for crop in sorted(crops_dir.glob("t_*.jpg")):  # one crop in memory at a time
-            image = cv2.imread(str(crop), cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                continue
-            n += 1
-            hits += best_logo_score(image, template, cfg.thumb_scales) >= cfg.thumb_logo_threshold
-    except (subprocess.SubprocessError, OSError) as exc:  # best effort: the full-frame checks still stand
-        logger.warning("tile sampling failed: %s", type(exc).__name__)
-        return 0, None
-    finally:
-        shutil.rmtree(crops_dir, ignore_errors=True)
+    for tile in tiles[::stride]:
+        image = cv2.imread(str(tile.path), cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            continue
+        n += 1
+        hits += best_logo_score(image, template, cfg.thumb_scales) >= cfg.thumb_logo_threshold
     return n, (hits / n if n else None)

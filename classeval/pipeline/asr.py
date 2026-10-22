@@ -24,6 +24,11 @@ def _ensure_cuda_dlls() -> None:
                 os.environ["PATH"] = torch_lib + os.pathsep + os.environ.get("PATH", "")
 
 
+def _device_and_compute() -> tuple[str, str]:
+    """GPU with half-precision weights when a CUDA GPU is present, otherwise the CPU with 8-bit weights (slower, same result)."""
+    return ("cuda", "int8_float16") if torch.cuda.is_available() else ("cpu", "int8")
+
+
 def _load_model(settings: Settings, model_name: str | None = None):
     from faster_whisper import BatchedInferencePipeline, WhisperModel
 
@@ -33,10 +38,11 @@ def _load_model(settings: Settings, model_name: str | None = None):
     local_dir = Path(whisper_dir) / model_name
     model_path = str(local_dir) if (local_dir / "model.bin").exists() else model_name
 
+    device, compute_type = _device_and_compute()
     model = WhisperModel(
         model_path,
-        device="cuda",
-        compute_type="int8_float16",
+        device=device,
+        compute_type=compute_type,
         download_root=whisper_dir,
     )
     batched = BatchedInferencePipeline(model=model)
@@ -54,10 +60,11 @@ def detect_language(wav: Path, settings: Settings) -> tuple[str, float]:
     local_dir = Path(whisper_dir) / model_name
     model_path = str(local_dir) if (local_dir / "model.bin").exists() else model_name
 
+    device, compute_type = _device_and_compute()
     model = WhisperModel(
         model_path,
-        device="cuda",
-        compute_type="int8_float16",
+        device=device,
+        compute_type=compute_type,
         download_root=whisper_dir,
     )
 

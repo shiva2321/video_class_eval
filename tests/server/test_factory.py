@@ -4,7 +4,7 @@ from classeval.server.main import create_app
 
 
 def test_the_factory_runs_without_arguments_like_uvicorn_calls_it(monkeypatch):
-    """scripts/run.ps1 starts the server with `uvicorn classeval.server.main:create_app --factory`."""
+    """scripts/run.py starts the server with `uvicorn classeval.server.main:create_app --factory`."""
     monkeypatch.setenv("ACCESS_CODE", "test_factory_token_123")
     client = TestClient(create_app())
     assert client.get("/healthz").json()["status"] == "ok"

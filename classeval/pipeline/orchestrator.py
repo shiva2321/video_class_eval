@@ -127,7 +127,7 @@ def _purge_media(job_dir: Path) -> None:
 
 
 def _media_present(prepared: Prepared) -> bool:
-    return prepared.wav is not None and Path(prepared.wav).exists() and all(Path(f.path).exists() for f in prepared.frames)
+    return prepared.wav is not None and Path(prepared.wav).exists() and all(Path(f.path).exists() for f in [*prepared.frames, *prepared.tiles])
 
 
 def execute_pipeline(
@@ -262,11 +262,14 @@ def _execute_pipeline(
         t0 = time.monotonic()
         if prepared.info.has_video and frame_states:
             video_facts = fns.video(frame_states, d, tr, settings, frames=prepared.frames)
-            n_crops, share = fns.thumbnail(input_path, job_dir / "work", settings)
-            video_facts = video_facts.model_copy(update={"thumb_crops": n_crops, "thumb_branded_share": share})
             client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
-            seen = fns.visual(input_path, job_dir / "work", frame_states, d, prepared.frames, settings, client)
-            video_facts = video_facts.model_copy(update=seen)  # the model stays loaded for the next stage
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                # the backdrop search (CPU) runs while the vision model (GPU) looks at the tutor
+                fut_tiles = pool.submit(fns.thumbnail, prepared.tiles, settings)
+                seen = fns.visual(frame_states, d, prepared.frames, prepared.tiles, settings, client)
+                n_crops, share = fut_tiles.result()
+            video_facts = video_facts.model_copy(update={"thumb_crops": n_crops, "thumb_branded_share": share, **seen})
+            # the vision model stays loaded for the next stage
         else:
             video_facts = VideoFacts(
                 states=[],
