@@ -8,8 +8,14 @@ The local language model is pulled separately by Ollama (scripts/install.py does
 """
 
 import argparse
+import os
 import sys
+import time
 from pathlib import Path
+
+# The fast "xet" download backend of huggingface_hub can stall for good on some networks (no error, no progress). Plain
+# HTTPS downloads are slower on paper and always finish; set HF_HUB_DISABLE_XET=0 to opt back in.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -25,12 +31,25 @@ def folder_mb(path: Path) -> float:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file()) / (1024 * 1024) if path.exists() else 0.0
 
 
+def download(repo: str, attempts: int = 4, **kwargs) -> str:
+    """snapshot_download with retries; finished files are kept, so a retry continues where the last attempt stopped."""
+    from huggingface_hub import snapshot_download
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return snapshot_download(repo, **kwargs)
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            print(f"  attempt {attempt} failed ({type(exc).__name__}); retrying in {5 * attempt} s", flush=True)
+            time.sleep(5 * attempt)
+    raise AssertionError("unreachable")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download the models used by the pipeline.")
     parser.add_argument("--english-only", action="store_true", help="skip the multilingual speech model (3 GB)")
     args = parser.parse_args(argv)
-
-    from huggingface_hub import snapshot_download
 
     cfg = load_config_dict(ROOT / "config.yaml")
     models = cfg.get("models", {})
@@ -45,12 +64,12 @@ def main(argv: list[str] | None = None) -> int:
     for folder, repo in wanted:
         target = whisper_dir / folder
         print(f"speech model {repo} -> {target}", flush=True)
-        snapshot_download(repo, local_dir=str(target))
+        download(repo, local_dir=str(target))
         print(f"  done, {folder_mb(target):.0f} MB", flush=True)
 
     clip = models.get("clip", "openai/clip-vit-base-patch32")
     print(f"image model {clip} -> Hugging Face cache", flush=True)
-    snapshot_download(clip)
+    download(clip)
 
     ecapa = models.get("ecapa", "speechbrain/spkrec-ecapa-voxceleb")
     print(f"voice model {ecapa} -> {ROOT / '.cache' / 'ecapa'}", flush=True)

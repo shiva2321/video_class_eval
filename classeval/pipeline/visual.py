@@ -6,7 +6,9 @@ resolution; while the tutor is full-screen the whole frame is used. Only categor
 pictures show. Everything is best effort: when the model is unavailable the dimension falls back to the older measure.
 """
 
+import concurrent.futures
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -88,8 +90,8 @@ def analyze(
     client: OllamaClient,
 ) -> dict[str, Any]:
     cfg = settings.screen_state
-    answers: list[dict[str, str]] = []
     camera_off = 0
+    jobs: list[tuple[Path, str]] = []
     for t in pick_moments(d, cfg.visual_samples):
         state = _nearest(states, t)
         if state is not None and state.state == "CAMERA_OFF_CARD":
@@ -98,20 +100,28 @@ def analyze(
         frame = _nearest(frames, t) if state is not None and state.state in _FULL_FRAME_STATES else None
         tile = _nearest(tiles, t)
         if frame is not None:
-            path, prompt = frame.path, PROMPT_FULL
+            jobs.append((Path(frame.path), PROMPT_FULL))
         elif tile is not None and abs(tile.t - t) <= cfg.tile_every_s:
-            path, prompt = tile.path, PROMPT_TILE
-        else:
-            continue
+            jobs.append((Path(tile.path), PROMPT_TILE))
+
+    unavailable = threading.Event()
+
+    def ask(job: tuple[Path, str]) -> dict[str, str] | None:
+        if unavailable.is_set():
+            return None
+        path, prompt = job
         try:
-            image = Path(path).read_bytes()
-            answer = _ask(client, image, prompt)
+            return _ask(client, path.read_bytes(), prompt)
         except OSError as exc:
             logger.warning("tutor visibility check could not read a picture: %s", type(exc).__name__)
-            continue
         except LLMUnavailable:
             logger.warning("the vision model is unavailable; skipping the tutor visibility check")
-            return {}
-        if answer is not None:
-            answers.append(answer)
-    return summarize(answers, camera_off, cfg.visual_min_samples)
+            unavailable.set()
+        return None
+
+    # The same server that answers the checklist chunks answers these, several at a time when it has the slots.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, settings.ollama.parallel)) as pool:
+        results = list(pool.map(ask, jobs))
+    if unavailable.is_set():
+        return {}
+    return summarize([r for r in results if r is not None], camera_off, cfg.visual_min_samples)

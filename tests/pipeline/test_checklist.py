@@ -621,3 +621,106 @@ def test_extract_sends_each_chunk_its_own_schema(settings):
     extract(tr, d, facts, Spy(), settings)
     assert seen[0][0] == "R4" and "R4" not in seen[1]
     assert "R11" in seen[-1] and all("R11" not in s for s in seen[:-1])
+
+
+def _chunk(dim, verdict, quote=None, t=10.0):
+    ev = [{"t": t, "quote": quote}] if quote else []
+    return {"items": [{"dimension": dim, "verdict": verdict, "reason": "Because of what was said.", "evidence": ev}], "strengths": [], "improvements": []}
+
+
+def _mean_fixture():
+    quotes = ["well done everybody that was a lovely answer", "now let us look at the next position together"]
+    segs = [Segment(start=10.0 + i * 500.0, end=18.0 + i * 500.0, text=q, speaker="T") for i, q in enumerate(quotes)]
+    tr = Transcript(language="en", language_confidence=0.95, asr_model="w", segments=segs)
+    times = [(i * 480.0, (i + 1) * 480.0) for i in range(3)]
+    return quotes, tr, times
+
+
+def test_a_behaviour_through_the_class_is_the_mean_of_the_chunks_not_the_best_one():
+    quotes, tr, times = _mean_fixture()
+    evals = [_chunk("R7", "met", quotes[0], t=10.0), _chunk("R7", "not_met"), _chunk("R7", "partial", quotes[1], t=510.0)]
+    item = checklist.reduce_chunks(evals, times, tr, tutor="T").items["R7"]
+    assert item.score == pytest.approx((100 + 10 + 60) / 3, abs=0.1) and item.verdict == "partial"
+    assert item.evidence  # the quote of the chunk that was met
+    best = checklist.reduce_chunks(evals, times, tr, tutor="T", mean_behaviours=False).items["R7"]
+    assert best.verdict == "met" and best.score is None  # the old rule: one lucky chunk decides
+
+
+def test_a_claim_nobody_can_quote_is_left_out_of_the_mean_instead_of_counted():
+    quotes, tr, times = _mean_fixture()
+    evals = [_chunk("R6", "met", "words the tutor never said at all"), _chunk("R6", "met", quotes[1], t=510.0)]
+    item = checklist.reduce_chunks(evals, times, tr, tutor="T").items["R6"]
+    assert item.score == 100.0 and item.evidence  # only the chunk with a verified quote is averaged
+
+
+def test_chunks_that_did_not_observe_a_behaviour_are_left_out_of_the_mean():
+    _, tr, times = _mean_fixture()
+    evals = [_chunk("R9", "not_observed"), _chunk("R9", "not_met"), _chunk("R9", "not_observed")]
+    item = checklist.reduce_chunks(evals, times, tr, tutor="T").items["R9"]
+    assert item.score == 10.0 and item.verdict == "not_met"
+    nothing = checklist.reduce_chunks([_chunk("R9", "not_observed")] * 3, times, tr, tutor="T").items["R9"]
+    assert nothing.verdict == "not_observed" and nothing.score is None
+
+
+def test_event_like_dimensions_keep_the_any_chunk_rule():
+    quotes, tr, times = _mean_fixture()
+    evals = [_chunk("R5", "met", quotes[0]), _chunk("R5", "not_met"), _chunk("R5", "not_met")]
+    item = checklist.reduce_chunks(evals, times, tr, tutor="T").items["R5"]
+    assert item.verdict == "met" and item.score is None  # a new joiner's introduction happens once
+
+
+def test_scoring_uses_the_mean_score_of_an_item_when_it_has_one(settings):
+    from classeval.pipeline import scoring
+    from tests.pipeline.test_scoring import _make_dummy_inputs
+
+    media, tr, d, audio, video, tfacts, chk = _make_dummy_inputs(all_verdicts="met")
+    base = scoring.score(media, tr, d, audio, video, tfacts, chk, settings)
+    chk.items["R7"] = ChecklistItem(dimension="R7", verdict="partial", score=20.0, evidence=chk.items["R7"].evidence)
+    low = scoring.score(media, tr, d, audio, video, tfacts, chk, settings)
+    r7 = lambda res: next(x for x in res.dimensions if x.id == "R7").score
+    assert r7(low) < r7(base)
+
+
+def test_chunks_are_judged_in_parallel_but_returned_in_order(settings):
+    import threading
+    import time
+
+    from classeval.pipeline.checklist import extract
+
+    tr, d, facts = _long_class()
+    settings.ollama.parallel = 3
+    lock = threading.Lock()
+    state = {"now": 0, "peak": 0}
+
+    class Slow:
+        def chat_json(self, system, user, schema, images=None):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.15)
+            with lock:
+                state["now"] -= 1
+            index = int(user.split("Transcript chunk ")[1].split(" of")[0])
+            return {**GOOD_CHUNK, "topic": f"Topic number {index}"}
+
+    res = extract(tr, d, facts, Slow(), settings)
+    assert state["peak"] > 1  # more than one request was in flight
+    assert res.topics == [f"Topic number {i}" for i in range(1, res.chunks_total + 1)]  # the order of the class is kept
+
+
+def test_a_parallelism_of_one_runs_the_chunks_one_after_the_other(settings):
+    import threading
+
+    from classeval.pipeline.checklist import extract
+
+    tr, d, facts = _long_class()
+    settings.ollama.parallel = 1
+    names = set()
+
+    class Spy:
+        def chat_json(self, *args, **kwargs):
+            names.add(threading.current_thread().name)
+            return GOOD_CHUNK
+
+    extract(tr, d, facts, Spy(), settings)
+    assert len(names) == 1

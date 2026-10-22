@@ -43,7 +43,7 @@ def test_chat_json_sends_schema_and_zero_temperature():
     assert captured_request["stream"] is False
     assert captured_request["options"]["temperature"] == 0
     assert captured_request["options"]["seed"] == 7
-    assert captured_request["options"]["num_ctx"] == 16384
+    assert captured_request["options"]["num_ctx"] == 8192  # a chunk and its answer need about 5000 tokens; a smaller window leaves room for parallel calls
 
 
 def test_invalid_json_on_every_attempt_raises_bad_output():
@@ -104,3 +104,17 @@ def test_timeout_raises_unavailable():
 
     with pytest.raises(LLMUnavailable):
         client.chat_json("sys", "user", schema={"type": "object"})
+
+
+def test_the_context_window_and_the_seed_come_from_the_client_settings():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        seen.update(_json.loads(request.content)["options"])
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "{}"}})
+
+    client = OllamaClient("http://mock", "m", transport=httpx.MockTransport(handler), seed=42, num_ctx=4096)
+    client.chat_json("s", "u", schema={"type": "object"})
+    assert seen["seed"] == 42 and seen["num_ctx"] == 4096

@@ -87,19 +87,19 @@ def test_camera_off_cards_count_without_asking_the_model(tmp_path, settings):
     client = FakeClient([ON])
     out = visual.analyze(states, _diar(), frames, tiles, settings, client)
     assert client.calls == 0
-    assert out["tutor_visible_ratio"] == 0.0 and out["visual_samples"] == 16
+    assert out["tutor_visible_ratio"] == 0.0 and out["visual_samples"] == settings.screen_state.visual_samples
 
 
 def test_full_screen_tutor_moments_use_the_whole_frame_and_shared_screens_use_the_tile(tmp_path, settings):
     states, frames, tiles = _inputs(tmp_path, state="OTHER_TALKING_HEAD")
     client = FakeClient([ON])
     visual.analyze(states, _diar(), frames, tiles, settings, client)
-    assert client.calls == 16 and all(img == [b"frame"] for img in client.images)
+    assert client.calls == settings.screen_state.visual_samples and all(img == [b"frame"] for img in client.images)
 
     states, frames, tiles = _inputs(tmp_path, state="BOARD_SHARE")
     client = FakeClient([ON])
     visual.analyze(states, _diar(), frames, tiles, settings, client)
-    assert client.calls == 16 and all(img == [b"tile"] for img in client.images)
+    assert client.calls == settings.screen_state.visual_samples and all(img == [b"tile"] for img in client.images)
 
 
 def test_a_moment_without_a_tile_close_enough_is_skipped(tmp_path, settings):
@@ -113,7 +113,7 @@ def test_a_moment_without_a_tile_close_enough_is_skipped(tmp_path, settings):
 def test_an_unusable_answer_skips_that_moment_and_an_unavailable_model_gives_nothing(tmp_path, settings):
     states, frames, tiles = _inputs(tmp_path)
     out = visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([LLMBadOutput, ON]))
-    assert out["visual_samples"] == 15  # the first moment is skipped, the rest are counted
+    assert out["visual_samples"] == settings.screen_state.visual_samples - 1  # the first moment is skipped, the rest are counted
     assert visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([LLMUnavailable])) == {}
 
 
@@ -127,7 +127,7 @@ def test_an_unreadable_picture_skips_that_moment(tmp_path, settings):
     states, frames, tiles = _inputs(tmp_path)
     tiles[0].path.unlink()
     out = visual.analyze(states, _diar(), frames, tiles, settings, FakeClient([ON]))
-    assert out["visual_samples"] < 16
+    assert out["visual_samples"] < settings.screen_state.visual_samples
 
 
 def _r2(settings, **fields):

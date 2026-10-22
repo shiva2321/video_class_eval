@@ -23,10 +23,14 @@ class OllamaClient:
         model: str,
         timeout_s: float = 180.0,
         transport: httpx.BaseTransport | None = None,
+        seed: int = 7,
+        num_ctx: int = 8192,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_s = timeout_s
+        self.seed = seed
+        self.num_ctx = num_ctx
         self.transport = transport
 
     def chat_json(
@@ -53,8 +57,8 @@ class OllamaClient:
             "keep_alive": "10m",  # stay loaded between the chunks of one job
             "options": {
                 "temperature": 0,
-                "seed": 7,
-                "num_ctx": 16384,
+                "seed": self.seed,
+                "num_ctx": self.num_ctx,
                 "num_predict": MAX_OUTPUT_TOKENS,  # hard bound: a runaway generation must never stall a job
             },
         }
@@ -66,7 +70,7 @@ class OllamaClient:
 
         for attempt in range(max_attempts):
             if attempt:
-                payload["options"] = {**payload["options"], "seed": 7 + attempt, "temperature": 0.3}
+                payload["options"] = {**payload["options"], "seed": self.seed + attempt, "temperature": 0.3}
             try:
                 with httpx.Client(
                     base_url=self.base_url,

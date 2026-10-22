@@ -1,6 +1,8 @@
+import concurrent.futures
 import copy
 import logging
 import re
+import threading
 from typing import Any, Literal
 
 import numpy as np
@@ -28,6 +30,7 @@ class ChecklistItem(BaseModel):
     dimension: DimId
     verdict: Literal["met", "partial", "not_met", "not_observed"]
     evidence: list[Evidence] = Field(default_factory=list)
+    score: float | None = None  # a mean over chunks (0-100) when the dimension is averaged instead of decided by one verdict
     reason: str = ""  # one visible sentence explaining the verdict
 
 
@@ -55,14 +58,14 @@ Dimensions, as the tutors' quality reviewers define them:
 - R11 Conclusion: a proper closing with a recap of what was learned, a goodbye and a preview of the next class.
 Also give topic: what this chunk is about in at most 10 words (the concept or activity).
 For every dimension also give a reason: one plain sentence (at most 25 words) saying why you chose the verdict, based on what the chunk shows.
-Evidence: 1 to 2 items per dimension when the verdict is met, partial or not_met; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (4 to 15 words).
+Evidence: exactly 1 item per dimension when the verdict is met or partial; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (4 to 15 words).
 Also return up to 2 specific strengths and up to 2 specific improvements. Each MUST include 1 to 2 evidence items in the same form (a verbatim TUTOR quote with its t).
 """
 
 _DIMS_ENUM = ["R4", "R5", "R6", "R7", "R9", "R10", "R11"]
 _EVIDENCE_ITEMS = {
     "type": "array",
-    "maxItems": 2,
+    "maxItems": 1,
     "items": {
         "type": "object",
         "properties": {"t": {"type": "number"}, "quote": {"type": "string", "maxLength": 220}},
@@ -396,6 +399,24 @@ _NOTHING_SEEN: dict[str, str] = {
 }
 
 
+BEHAVIOUR_DIMS: tuple[DimId, ...] = ("R6", "R7", "R9")
+_CHUNK_SCORE = {"met": 100.0, "partial": 60.0, "not_met": 10.0}
+
+
+def _mean_item(dim: DimId, candidates: list[ChecklistItem]) -> ChecklistItem:
+    """Average the chunks that judged `dim` (an unquotable "met" or "partial" was already turned into "not_observed")."""
+    points = [_CHUNK_SCORE[c.verdict] for c in candidates if c.verdict in _CHUNK_SCORE]
+    if not points:
+        return ChecklistItem(dimension=dim, verdict="not_observed", evidence=[])
+    mean = sum(points) / len(points)
+    verdict = "met" if mean >= 80.0 else "partial" if mean >= 35.0 else "not_met"
+    supporting = [c for c in candidates if c.verdict in ("met", "partial")]
+    evidence = [e for c in supporting for e in c.evidence][:3] if verdict != "not_met" else []
+    pool = [c for c in candidates if c.verdict == verdict] or candidates
+    reason = next((c.reason for c in pool if c.reason), "")
+    return ChecklistItem(dimension=dim, verdict=verdict, evidence=evidence, reason=reason, score=round(mean, 1))
+
+
 def _pick_verdict(dim: DimId, candidates: list[ChecklistItem]) -> ChecklistItem:
     """Winner rule: any met with verified evidence wins, else partial, else not_met, else not_observed."""
     for verdict in ("met", "partial", "not_met"):
@@ -412,6 +433,7 @@ def reduce_chunks(
     chunk_times: list[tuple[float, float]],
     tr: Transcript,
     tutor: str | None = None,
+    mean_behaviours: bool = True,
 ) -> ChecklistResult:
     """Aggregate per-chunk checklist evaluations according to dimension reduction rules."""
     n_chunks = len(chunk_evals)
@@ -443,7 +465,7 @@ def reduce_chunks(
                     reason=clean_reason(str(it.get("reason", ""))),
                 )
                 candidates.append(verify_evidence(raw_item, tr, tutor))
-        item = _pick_verdict(dim, candidates)
+        item = _mean_item(dim, candidates) if mean_behaviours and dim in BEHAVIOUR_DIMS else _pick_verdict(dim, candidates)
         analysed = any(chunk_evals[i] for i in allowed_indices if i < n_chunks)
         if item.verdict == "not_observed" and dim in _NOTHING_SEEN and analysed:
             # the part of the class where this belongs was read and it was not there: that is a miss, not a gap
@@ -570,27 +592,31 @@ def extract(
     if not chunks:
         return _fallback_from_tfacts(tfacts, tr, d)
 
-    chunk_evals: list[dict[str, Any]] = []
     chunk_times: list[tuple[float, float]] = [(t0, t1) for t0, t1, _ in chunks]
-    service_down = False
+    service_down = threading.Event()
 
-    for i, (_, _, text) in enumerate(chunks):
-        chunk_evals.append({})  # an empty answer keeps the chunk's position so "opening" and "closing" stay correct
-        if service_down:
-            continue
+    def judge(i: int) -> dict[str, Any]:
+        if service_down.is_set():
+            return {}  # an empty answer keeps the chunk's position so "opening" and "closing" stay correct
         dims = dims_for_chunk(i, chunk_times)
-        prompt = build_chunk_prompt(text, chunk_index=i, total_chunks=len(chunks), dims=dims)
+        prompt = build_chunk_prompt(chunks[i][2], chunk_index=i, total_chunks=len(chunks), dims=dims)
         try:
-            chunk_evals[i] = llm.chat_json(SYSTEM_PROMPT, prompt, schema=schema_for(dims))
+            return llm.chat_json(SYSTEM_PROMPT, prompt, schema=schema_for(dims))
         except LLMBadOutput:
             logger.warning("chunk %d/%d: the model gave no usable answer", i + 1, len(chunks))
         except LLMUnavailable:
             logger.warning("the model is unavailable; skipping the remaining chunks")
-            service_down = True
+            service_down.set()
+        return {}
+
+    # Several chunks at once: a server started with OLLAMA_NUM_PARALLEL answers them together, any other server queues them.
+    workers = max(1, min(settings.ollama.parallel, len(chunks)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        chunk_evals: list[dict[str, Any]] = list(pool.map(judge, range(len(chunks))))
 
     failed = sum(1 for ev in chunk_evals if not ev)
     if failed == len(chunks):  # nothing was analysed: use the word lists, flagged as degraded
         return _fallback_from_tfacts(tfacts, tr, d)
-    result = reduce_chunks(chunk_evals, chunk_times, tr, tutor=d.tutor)
+    result = reduce_chunks(chunk_evals, chunk_times, tr, tutor=d.tutor, mean_behaviours=settings.checklist.mean_behaviours)
     result.chunks_total, result.chunks_failed = len(chunks), failed
     return result

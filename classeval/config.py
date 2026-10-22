@@ -19,6 +19,15 @@ class ModelsConfig(BaseModel):
 
 class OllamaConfig(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
+    seed: int = 7  # the sampling seed of every model call; a different seed gives a different but equally valid answer
+    parallel: int = 4  # transcript chunks sent to the model at once; the server runs as many as it has slots for and queues the rest
+    num_ctx: int = 8192  # context window of every call (a chunk and its answer need about 5000 tokens)
+
+
+class ChecklistConfig(BaseModel):
+    # Behaviours that run through a whole class (individual interaction, warmth, content moves) are scored as the mean over
+    # the chunks the model judged. With False the best chunk wins, which rewards one lucky verdict and grows with class length.
+    mean_behaviours: bool = True
 
 
 class GroupsConfig(BaseModel):
@@ -96,7 +105,7 @@ class ScreenStateConfig(BaseModel):
     thumb_logo_threshold: float = 0.56  # best score without the backdrop stays below ~0.52, with it above ~0.6
     thumb_present_share: float = 0.15  # the backdrop counts as shown when it appears in this share of the moments
     thumb_min_crops: int = 5
-    visual_samples: int = 16  # tutor-speaking moments shown to the vision model
+    visual_samples: int = 12  # tutor-speaking moments shown to the vision model
     visual_min_samples: int = 4
 
 
@@ -107,6 +116,7 @@ class LanguagesConfig(BaseModel):
 
 class Settings(BaseModel):
     models: ModelsConfig
+    checklist: ChecklistConfig = Field(default_factory=ChecklistConfig)
     ollama: OllamaConfig
     weights: dict[str, float]
     groups: GroupsConfig

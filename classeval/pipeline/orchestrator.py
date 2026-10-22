@@ -262,7 +262,7 @@ def _execute_pipeline(
         t0 = time.monotonic()
         if prepared.info.has_video and frame_states:
             video_facts = fns.video(frame_states, d, tr, settings, frames=prepared.frames)
-            client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+            client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm, seed=settings.ollama.seed, num_ctx=settings.ollama.num_ctx)
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 # the backdrop search (CPU) runs while the vision model (GPU) looks at the tutor
                 fut_tiles = pool.submit(fns.thumbnail, prepared.tiles, settings)
@@ -297,7 +297,7 @@ def _execute_pipeline(
     else:
         t0 = time.monotonic()
         tfacts = fns.tfacts(tr, d, settings)
-        client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+        client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm, seed=settings.ollama.seed, num_ctx=settings.ollama.num_ctx)
         try:
             checklist_res = fns.understand(tr, d, tfacts, client, settings)
         finally:
@@ -361,7 +361,7 @@ def _execute_pipeline(
     rep.stats = class_stats_mod.compute(
         tr, d, audio_facts, video_facts, tfacts, prepared.info, text_supported=text_checks_supported(tr, settings)
     )
-    client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+    client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm, seed=settings.ollama.seed, num_ctx=settings.ollama.num_ctx)
     try:
         rep.narrative = fns.narrative(rep, client)
     finally:

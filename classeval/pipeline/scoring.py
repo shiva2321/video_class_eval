@@ -63,6 +63,13 @@ PROVISIONAL_COVERAGE = 0.8  # below this share of the rubric assessed, the top g
 START_WEIGHT = 0.4  # share of R4 that comes from the start time when the opening was also judged from the words
 
 
+def _value(item) -> float | None:
+    """The 0-100 value of a checklist item: its own mean score when it has one, else the fixed value of its verdict."""
+    if item is None:
+        return None
+    return item.score if item.score is not None else VERDICT_MAP.get(item.verdict)
+
+
 def _norm(x: float | None, lo: float, hi: float) -> float:
     """Normalize x to [0, 1] clamping to bounds. Inverts scale if lo > hi."""
     if x is None:
@@ -194,7 +201,7 @@ def score(
     tutor_starts = [t.start for t in d.turns if d.tutor is not None and t.speaker == d.tutor]
     start_s = min(tutor_starts) if tutor_starts else None
     start_score = None if start_s is None else 100.0 * _norm(start_s, START_ZERO_S, START_FULL_S)
-    words_score = None if lang_uncertain else VERDICT_MAP.get(r4_item.verdict if r4_item else "not_observed")
+    words_score = None if lang_uncertain else _value(r4_item)
     if words_score is not None and start_score is not None:
         dim_scores["R4"] = (1.0 - START_WEIGHT) * words_score + START_WEIGHT * start_score
     else:
@@ -212,7 +219,7 @@ def score(
         dim_scores["R5"] = None
         dim_notes["R5"] = "Text-derived dimension not assessed due to uncertain language"
     else:
-        dim_scores["R5"] = VERDICT_MAP.get(r5_item.verdict if r5_item else "not_observed")
+        dim_scores["R5"] = _value(r5_item)
         dim_evidence["R5"] = r5_item.evidence if r5_item else []
 
     # R6: Interactive Questioning
@@ -221,7 +228,7 @@ def score(
         dim_scores["R6"] = None
         dim_notes["R6"] = "Text-derived dimension not assessed due to uncertain language"
     else:
-        v_r6 = VERDICT_MAP.get(r6_item.verdict if r6_item else "not_observed")
+        v_r6 = _value(r6_item)
         qrr_norm = _norm(tfacts.question_reply_rate, 0.2, 0.8)
         if v_r6 is not None:
             dim_scores["R6"] = 0.6 * v_r6 + 0.4 * 100.0 * qrr_norm
@@ -231,7 +238,7 @@ def score(
 
     # R7: Voice & Delivery
     dim_sources["R7"] = ["checklist:R7", "audio:pitch_std_semitones_tutor", "audio:energy_cv_tutor"]
-    v_r7 = VERDICT_MAP.get(r7_item.verdict if r7_item else "not_observed")
+    v_r7 = _value(r7_item)
     pitch_norm = _norm(audio.pitch_std_semitones_tutor, 1.5, 4.0)
     energy_norm = _norm(audio.energy_cv_tutor, 0.4, 1.0)
     if v_r7 is not None:
@@ -265,7 +272,7 @@ def score(
     )
     board_norm = _norm(shared_ratio, 0.15, 0.6)
     video_term = 100.0 if video.lesson_video_ratio > 0.02 else 0.0
-    v_r9 = VERDICT_MAP.get(r9_item.verdict if r9_item else "not_observed")
+    v_r9 = _value(r9_item)
     if not has_video:
         dim_scores["R9"] = v_r9  # no screen evidence without video: judge from the transcript alone
     elif v_r9 is not None:
@@ -285,7 +292,7 @@ def score(
         dim_scores["R10"] = None
         dim_notes["R10"] = "Text-derived dimension not assessed due to uncertain language"
     else:
-        dim_scores["R10"] = VERDICT_MAP.get(r10_item.verdict if r10_item else "not_observed")
+        dim_scores["R10"] = _value(r10_item)
         dim_evidence["R10"] = r10_item.evidence if r10_item else []
 
     # R11: Class Wrap-up & Closing
@@ -294,7 +301,7 @@ def score(
         dim_scores["R11"] = None
         dim_notes["R11"] = "Text-derived dimension not assessed due to uncertain language"
     else:
-        v_r11 = VERDICT_MAP.get(r11_item.verdict if r11_item else "not_observed")
+        v_r11 = _value(r11_item)
         if v_r11 is not None:
             dim_scores["R11"] = min(100.0, v_r11 + (10.0 if video.last5_branded else 0.0))
         else:
