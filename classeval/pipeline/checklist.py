@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from rapidfuzz import fuzz
 
 from classeval.config import Settings
+from classeval.pipeline.language import text_checks_supported
 from classeval.pipeline.llm import LLMBadOutput, LLMUnavailable, OllamaClient
 from classeval.schema import (
     Diarization,
@@ -34,7 +35,7 @@ class ChecklistResult(BaseModel):
     degraded: bool = False
 
 
-SYSTEM_PROMPT = """You assess one chunk of an online chess class for children, taught by a tutor to several students.
+SYSTEM_PROMPT = """You assess one chunk of an online class for children (any subject, for example chess), taught by a tutor to several students.
 Each transcript line starts with its time in seconds, e.g. [125s], then TUTOR or STUDENT n. Output only JSON matching the schema.
 Judge only what this chunk shows. For each dimension return a verdict: "met", "partial", "not_met" or "not_observed"
 ("not_observed" when the chunk gives no evidence either way, e.g. a closing in a chunk from mid-class).
@@ -43,10 +44,10 @@ Dimensions, as the tutors' quality reviewers define them:
 - R5 New joiners: the tutor gives new children time to introduce themselves (name, a few words); "not_observed" if no new child is evident.
 - R6 Individual interaction: the tutor asks questions to individual children and makes sure everyone gets a turn, including quiet children.
 - R7 Warmth and energy: friendly, energetic, encouraging tone; praises effort; sounds pleasant to children.
-- R9 Content moves: revises the previous lesson, solves puzzles with the class, uses topic-related videos or the board well.
+- R9 Content moves: revises the previous lesson, practises with the class (exercises, puzzles, problems, games), or uses videos, slides or other shared material well.
 - R10 Homework: the tutor explicitly assigns homework or practice to do after class.
 - R11 Conclusion: a proper closing with a recap of what was learned, a goodbye and a preview of the next class.
-Also give topic: what this chunk is about in at most 10 words (the chess concept or activity).
+Also give topic: what this chunk is about in at most 10 words (the concept or activity).
 For every dimension also give a reason: one plain sentence (at most 25 words) saying why you chose the verdict, based on what the chunk shows.
 Evidence: 1 to 2 items per dimension when the verdict is met, partial or not_met; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (4 to 15 words).
 Also return up to 2 specific strengths and up to 2 specific improvements. Each MUST include 1 to 2 evidence items in the same form (a verbatim TUTOR quote with its t).
@@ -540,8 +541,8 @@ def extract(
     settings: Settings,
 ) -> ChecklistResult:
     """Extract pedagogical checklist items using Ollama LLM with fallback to transcript rule facts."""
-    if tr.language_confidence < 0.5:
-        # Text dimensions cannot be reliably assessed
+    if not text_checks_supported(tr, settings):
+        # Text dimensions cannot be reliably assessed (uncertain or unsupported language)
         return ChecklistResult(
             items={dim: ChecklistItem(dimension=dim, verdict="not_observed", evidence=[]) for dim in CHECKLIST_DIMS},
             strengths=[],

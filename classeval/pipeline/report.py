@@ -28,6 +28,8 @@ def summarize(result: ScoreResult, checklist: ChecklistResult) -> str:
             reasons.append(f"low rubric coverage ({round(result.coverage * 100)}%)")
         if "language_uncertain" in result.flags:
             reasons.append("uncertain spoken language confidence")
+        if "language_unsupported" in result.flags:
+            reasons.append("a spoken language the transcript checks do not support yet")
         reason_str = ", ".join(reasons) if reasons else "recording duration or speech activity below evaluation threshold"
         return (
             f"Overall Assessment: Insufficient evidence. "
@@ -52,6 +54,12 @@ def summarize(result: ScoreResult, checklist: ChecklistResult) -> str:
             summary_parts.append(
                 f"Primary area for growth is {weakest_dim.id} ({weakest_dim.name}) at {weakest_dim.score:.1f}/100."
             )
+
+    if "language_unsupported" in result.flags:
+        summary_parts.append(
+            "Most of this class was not in English, so transcript-based checks are marked not assessed; "
+            "measurements that do not depend on language are still reported."
+        )
 
     if result.flags:
         flags_str = ", ".join(result.flags)
@@ -126,13 +134,23 @@ _SCREEN_COLORS = {
     "NONE": "#e2e8f0",
 }
 _SCREEN_LABELS = {
-    "board": "chess board / puzzle",
+    "board": "board / puzzle / game",
     "lesson_video": "lesson video",
     "face_on_screen": "a face on screen",
     "camera_off": "camera off",
-    "other": "other screen",
+    "other": "slides or other shared screen",
     "NONE": "no frame",
 }
+
+
+_LANGUAGE_NAMES = {
+    "en": "English", "hi": "Hindi", "ml": "Malayalam", "ta": "Tamil", "te": "Telugu", "kn": "Kannada",
+    "bn": "Bengali", "mr": "Marathi", "gu": "Gujarati", "pa": "Punjabi", "ur": "Urdu",
+}
+
+
+def _language_name(code: str) -> str:
+    return _LANGUAGE_NAMES.get(code, code.upper())
 
 
 def _stat_card(value: str, label: str) -> str:
@@ -156,12 +174,15 @@ def _render_glance(stats: ClassStats | None, topics: list[str]) -> str:
         _stat_card(pct(stats.student_talk_pct), "students speaking"),
         _stat_card(pct(stats.silence_pct), "silence"),
         _stat_card(str(stats.student_voices), "student voices heard"),
-        _stat_card(f"{stats.tutor_questions} ({stats.open_questions} open)", "tutor questions"),
+        _stat_card(
+            str(stats.tutor_questions) if stats.open_questions is None else f"{stats.tutor_questions} ({stats.open_questions} open)",
+            "tutor questions",
+        ),
         _stat_card(pct(stats.question_reply_pct), "questions answered"),
         _stat_card("n/a" if stats.median_wait_s is None else f"{stats.median_wait_s:.1f} s", "typical wait for an answer"),
         _stat_card(str(stats.student_questions), "questions from students"),
-        _stat_card(str(stats.students_addressed_by_name), "children called by name"),
-        _stat_card(str(stats.praise_count), "praise moments"),
+        _stat_card("n/a" if stats.students_addressed_by_name is None else str(stats.students_addressed_by_name), "children called by name"),
+        _stat_card("n/a" if stats.praise_count is None else str(stats.praise_count), "praise moments"),
         _stat_card(f"{stats.longest_tutor_monologue_s:.0f} s", "longest tutor stretch without a student"),
         _stat_card(f"{stats.tutor_wpm:.0f}", "tutor words per minute"),
         _stat_card(f"{stats.student_words_per_min:.0f}", "student words per minute"),
@@ -292,6 +313,20 @@ def render_html(report: Report) -> str:
         else "None (all assessed)"
     )
 
+    lang_notice = ""
+    if "language_unsupported" in report.technical_flags:
+        lang_notice = (
+            f'<div class="section notice">Language notice: this class was mostly in {html.escape(_language_name(report.language))}. '
+            "Transcript-based checks (opening, introductions, homework, conclusion and similar) are validated for English "
+            "only, so they are marked not assessed instead of guessed. Everything that does not depend on language "
+            "(talk time, participation, pace, screen use, audio) is still measured and shown below.</div>"
+        )
+    elif "language_uncertain" in report.technical_flags:
+        lang_notice = (
+            '<div class="section notice">Language notice: the spoken language could not be identified reliably, so '
+            "transcript-based checks are marked not assessed. Language-independent measurements are still shown.</div>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -330,6 +365,7 @@ def render_html(report: Report) -> str:
     .flag-badge {{ background: #fee2e2; color: #991b1b; margin-right: 6px; }}
     .ok-badge {{ background: #f1f5f9; color: #475569; }}
     .empty-state {{ color: #94a3b8; font-style: italic; font-size: 14px; }}
+    .notice {{ background: #fffbeb; color: #92400e; font-size: 14px; border-left: 4px solid #f59e0b; }}
     .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }}
     .stat-card {{ padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }}
     .stat-value {{ font-size: 20px; font-weight: 800; color: #0f172a; }}
@@ -371,6 +407,7 @@ def render_html(report: Report) -> str:
       <div class="section-title">Executive Summary</div>
       <div class="summary-text">{html.escape(report.summary)}</div>
     </div>
+    {lang_notice}
     {_render_glance(report.stats, report.topics)}
 
     <div class="section">

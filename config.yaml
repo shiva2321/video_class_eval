@@ -3,6 +3,7 @@ models:
   whisper_dir: 'F:\models\whisper'
   clip: "openai/clip-vit-base-patch32"
   ecapa: "speechbrain/spkrec-ecapa-voxceleb"
+  whisper_multilingual: "faster-whisper-large-v3"
   pyannote: "pyannote/speaker-diarization-3.1"
   llm: "qwen3-vl:8b-instruct"
 
@@ -89,6 +90,9 @@ scoring:
 paths:
   jobs_dir: "jobs"
   uploads_dir: "uploads"
+
+languages:
+  full_support: ["en"]
 
 asr:
   device: "cuda"

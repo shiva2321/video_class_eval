@@ -186,14 +186,14 @@ class ClassStats(BaseModel):
     student_words_per_min: float
     student_voices: int
     tutor_questions: int
-    open_questions: int
+    open_questions: int | None = None  # None = not assessed (word lists need a supported language)
     question_reply_pct: float | None = None
     median_wait_s: float | None = None
     student_questions: int
     student_utterances: int
-    students_addressed_by_name: int
-    name_address_count: int
-    praise_count: int
+    students_addressed_by_name: int | None = None
+    name_address_count: int | None = None
+    praise_count: int | None = None
     longest_tutor_monologue_s: float
     first_tutor_speech_s: float | None = None
     last_tutor_speech_s: float | None = None

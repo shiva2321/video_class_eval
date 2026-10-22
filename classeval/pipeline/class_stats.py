@@ -122,6 +122,7 @@ def compute(
     video: VideoFacts,
     tfacts: TranscriptFacts,
     media: MediaInfo,
+    text_supported: bool = True,
 ) -> ClassStats:
     duration_s = max(media.duration_s, 1e-6)
     tutor = d.tutor
@@ -165,7 +166,7 @@ def compute(
         student_words_per_min=round(audio.student_words_per_min, 1),
         student_voices=sum(1 for w in words_by_voice.values() if w >= MIN_STUDENT_VOICE_WORDS),
         tutor_questions=tutor_questions,
-        open_questions=open_questions,
+        open_questions=open_questions if text_supported else None,
         question_reply_pct=(
             round(100.0 * tfacts.question_reply_rate, 1) if tfacts.question_reply_rate is not None else None
         ),
@@ -174,9 +175,9 @@ def compute(
         ),
         student_questions=student_questions,
         student_utterances=len(student_segs),
-        students_addressed_by_name=len(names),
-        name_address_count=address_utterances,
-        praise_count=sum(len(_PRAISE.findall(s.text)) for s in tutor_segs),
+        students_addressed_by_name=len(names) if text_supported else None,
+        name_address_count=address_utterances if text_supported else None,
+        praise_count=sum(len(_PRAISE.findall(s.text)) for s in tutor_segs) if text_supported else None,
         longest_tutor_monologue_s=round(_longest_tutor_stretch(segments, tutor), 1),
         first_tutor_speech_s=round(min(t.start for t in tutor_turns), 1) if tutor_turns else None,
         last_tutor_speech_s=round(max(t.end for t in tutor_turns), 1) if tutor_turns else None,

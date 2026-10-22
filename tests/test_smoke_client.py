@@ -23,6 +23,7 @@ def server_env(monkeypatch, tmp_path):
     return s, app
 
 
+@pytest.mark.gpu  # runs the real pipeline, which loads speech models on the GPU
 def test_smoke_client_in_process(server_env):
     settings, app = server_env
     transport = ASGITransport(app=app)

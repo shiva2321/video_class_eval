@@ -3,6 +3,7 @@ import re
 import numpy as np
 
 from classeval.config import Settings
+from classeval.pipeline.language import text_checks_supported
 from classeval.schema import (
     Detection,
     Diarization,
@@ -92,7 +93,9 @@ def compute(tr: Transcript, d: Diarization, settings: Settings) -> TranscriptFac
 
     # Without an identified tutor nothing can be attributed to the tutor, and children's speech must never be
     # quoted as tutor speech, so every detector is "not assessed" (fail closed).
-    unreliable = tr.language_confidence < 0.5 or (logprobs and median_lp < -1.0) or tutor_speaker is None
+    unreliable = (
+        not text_checks_supported(tr, settings) or (logprobs and median_lp < -1.0) or tutor_speaker is None
+    )
     if unreliable or not segments:
         default_dets = {
             "greeting_opening": Detection(assessed=not unreliable, score=0.0 if not unreliable else None, hits=[]),

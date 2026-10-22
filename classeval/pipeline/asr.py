@@ -24,12 +24,12 @@ def _ensure_cuda_dlls() -> None:
                 os.environ["PATH"] = torch_lib + os.pathsep + os.environ.get("PATH", "")
 
 
-def _load_model(settings: Settings):
+def _load_model(settings: Settings, model_name: str | None = None):
     from faster_whisper import BatchedInferencePipeline, WhisperModel
 
     _ensure_cuda_dlls()
     whisper_dir = str(settings.models.whisper_dir)
-    model_name = settings.models.whisper
+    model_name = model_name or settings.models.whisper
     local_dir = Path(whisper_dir) / model_name
     model_path = str(local_dir) if (local_dir / "model.bin").exists() else model_name
 
@@ -107,7 +107,19 @@ def transcribe(
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
 
-    model, batched = _load_model(settings)
+    # English classes use the fast turbo model. Anything else gets the full multilingual model: with a confident
+    # language it is pinned, with a mixed or uncertain one the model detects the language per segment.
+    language, language_prob = detect_language(wav, settings)
+    english = language == "en" and language_prob >= 0.5
+    model_name = settings.models.whisper if english else settings.models.whisper_multilingual
+    options: dict = {}
+    if not english:
+        if language_prob >= 0.85:
+            options["language"] = language
+        else:
+            options["multilingual"] = True
+
+    model, batched = _load_model(settings, model_name)
 
     try:
         segments_gen, info = batched.transcribe(
@@ -116,6 +128,7 @@ def transcribe(
             vad_filter=True,
             word_timestamps=True,
             condition_on_previous_text=False,
+            **options,
         )
 
         segments: list[Segment] = []
@@ -147,9 +160,9 @@ def transcribe(
                 progress(min(1.0, float(seg.end) / float(info.duration)))
 
         return Transcript(
-            language=info.language,
-            language_confidence=round(float(info.language_probability), 3),
-            asr_model=settings.models.whisper,
+            language=info.language if english else language,
+            language_confidence=round(float(info.language_probability), 3) if english else language_prob,
+            asr_model=model_name,
             segments=segments,
         )
     finally:

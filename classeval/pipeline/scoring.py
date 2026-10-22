@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from classeval.config import Settings
 from classeval.pipeline.checklist import ChecklistResult
+from classeval.pipeline.language import text_checks_supported
 from classeval.schema import (
     AudioFacts,
     Diarization,
@@ -15,6 +16,8 @@ from classeval.schema import (
     TranscriptFacts,
     VideoFacts,
 )
+
+_SHARED_STATES = {"BOARD_SHARE", "LESSON_VIDEO_SHARE", "OTHER_SHARE"}
 
 DIMENSION_META: dict[str, dict[str, Any]] = {
     "R1": {"name": "8x8 background", "group": "presentation"},
@@ -81,10 +84,12 @@ def score(
     # Flag checks
     if tr.language_confidence < 0.5:
         flags.append("language_uncertain")
+    elif not text_checks_supported(tr, settings):
+        flags.append("language_unsupported")
     if d.tutor_confidence < 0.5:
         flags.append("tutor_unclear")
 
-    lang_uncertain = "language_uncertain" in flags
+    lang_uncertain = bool({"language_uncertain", "language_unsupported"} & set(flags))
     # tutor_talk_share is a share of speech time, so tutor seconds = share x speech seconds
     tutor_speech_s = audio.tutor_talk_share * audio.speech_ratio * audio.duration_s
     has_video = media.has_video and video.n_frames > 0
@@ -209,8 +214,14 @@ def score(
     )
 
     # R9: Screen & Visual Material
-    dim_sources["R9"] = ["video:board_share_ratio", "video:lesson_video_ratio", "checklist:R9"]
-    board_norm = _norm(video.board_share_ratio, 0.15, 0.6)
+    dim_sources["R9"] = ["video:shared_material_ratio", "video:lesson_video_ratio", "checklist:R9"]
+    # Any shared lesson material counts (a chess board, slides, a document, a video): the subject can be anything.
+    shared_ratio = (
+        sum(1 for s in video.states if s.state in _SHARED_STATES) / len(video.states)
+        if video.states
+        else video.board_share_ratio
+    )
+    board_norm = _norm(shared_ratio, 0.15, 0.6)
     video_term = 100.0 if video.lesson_video_ratio > 0.02 else 0.0
     v_r9 = VERDICT_MAP.get(r9_item.verdict if r9_item else "not_observed")
     if not has_video:
@@ -222,7 +233,7 @@ def score(
     dim_evidence["R9"] = list(r9_item.evidence if r9_item else [])
     if has_video:
         dim_evidence["R9"] += _measure(
-            f"Chess board or puzzle shown on {video.board_share_ratio:.0%} of sampled frames; "
+            f"Lesson material (board, puzzle, slides or video) on screen in {shared_ratio:.0%} of sampled frames; "
             f"lesson video {'shown' if video.lesson_video_ratio > 0.02 else 'not shown'}"
         )
 

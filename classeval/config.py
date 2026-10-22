@@ -12,6 +12,7 @@ class ModelsConfig(BaseModel):
     whisper_dir: Path = Path(r"F:\models\whisper")
     clip: str = "openai/clip-vit-base-patch32"
     ecapa: str = "speechbrain/spkrec-ecapa-voxceleb"
+    whisper_multilingual: str = "faster-whisper-large-v3"
     pyannote: str = "pyannote/speaker-diarization-3.1"
     llm: str = "qwen3-vl:8b"
 
@@ -88,6 +89,11 @@ class ScreenStateConfig(BaseModel):
     clip_prompts: dict[str, list[str]] = Field(default_factory=dict)
 
 
+class LanguagesConfig(BaseModel):
+    # Transcript-based checks (word lists, model judgements, quotes) are validated for these languages only.
+    full_support: list[str] = Field(default_factory=lambda: ["en"])
+
+
 class Settings(BaseModel):
     models: ModelsConfig
     ollama: OllamaConfig
@@ -102,6 +108,7 @@ class Settings(BaseModel):
     asr: AsrConfig = Field(default_factory=AsrConfig)
     diarization: DiarizationConfig = Field(default_factory=DiarizationConfig)
     screen_state: ScreenStateConfig = Field(default_factory=ScreenStateConfig)
+    languages: LanguagesConfig = Field(default_factory=LanguagesConfig)
 
     access_code: SecretStr
     hf_token: SecretStr | None = None

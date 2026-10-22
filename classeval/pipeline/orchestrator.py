@@ -48,6 +48,7 @@ from classeval.pipeline import (
 )
 from classeval.pipeline.checklist import ChecklistResult
 from classeval.pipeline.ingest import IngestError, Prepared
+from classeval.pipeline.language import text_checks_supported
 from classeval.pipeline.llm import OllamaClient
 from classeval.pipeline.scoring import ScoreResult
 from classeval.schema import (
@@ -309,7 +310,9 @@ def execute_pipeline(
         versions,
         summary,
     )
-    rep.stats = class_stats_mod.compute(tr, d, audio_facts, video_facts, tfacts, prepared.info)
+    rep.stats = class_stats_mod.compute(
+        tr, d, audio_facts, video_facts, tfacts, prepared.info, text_supported=text_checks_supported(tr, settings)
+    )
     html_content = fns.report_render(rep)
     timings_s["report"] = round(time.monotonic() - t0, 2)
 
