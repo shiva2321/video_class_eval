@@ -88,7 +88,7 @@ def test_stage_sections_load_from_yaml(monkeypatch):
     settings = load_settings("config.yaml", env_file=None)
     assert settings.asr.compute_type == "int8_float16"
     assert settings.asr.language_windows == 5
-    assert settings.diarization.prefer == "pyannote"
+    assert settings.diarization.prefer == "ecapa"
     assert settings.screen_state.flat_card_luma_range == (20.0, 40.0)
     assert settings.screen_state.logo_scales[0] == 0.35 and settings.screen_state.logo_scales[-1] == 1.6
     assert set(settings.screen_state.clip_prompts) == {

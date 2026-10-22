@@ -105,7 +105,7 @@ asr:
   language_window_s: 30
 
 diarization:
-  prefer: "pyannote"
+  prefer: "ecapa"
   ecapa_window_s: 1.5
   ecapa_hop_s: 0.75
   ecapa_merge_gap_s: 0.5

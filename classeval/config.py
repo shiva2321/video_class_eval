@@ -71,7 +71,7 @@ class AsrConfig(BaseModel):
 
 
 class DiarizationConfig(BaseModel):
-    prefer: Literal["pyannote", "ecapa"] = "pyannote"
+    prefer: Literal["pyannote", "ecapa"] = "ecapa"  # pyannote is not used: it breaks with the pinned huggingface-hub
     ecapa_window_s: float = 1.5
     ecapa_hop_s: float = 0.75
     ecapa_merge_gap_s: float = 0.5
