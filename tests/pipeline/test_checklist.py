@@ -438,3 +438,25 @@ def test_reason_is_masked_and_cleared_when_the_verdict_is_downgraded():
     assert ok.verdict == "met" and "Gautham" not in ok.reason and "[Name]" in ok.reason
     bad = reduce_chunks([invented], [(0.0, 480.0)], tr, tutor="S0").items["R10"]
     assert bad.verdict == "not_observed" and bad.reason == ""
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Tutor greets Gautham warmly.", "Tutor greets [Name] warmly."),
+        ('Tutor repeats "I hate chess" kindly. A second sentence follows.', "Tutor repeats kindly."),
+        ("See http://evil.example for details.", ""),
+        ("Praises effort <b>loudly</b>.", ""),
+        ("", ""),
+    ],
+)
+def test_clean_reason(raw, expected):
+    from classeval.pipeline.checklist import clean_reason
+
+    assert clean_reason(raw) == expected
+
+
+def test_clean_reason_is_bounded():
+    from classeval.pipeline.checklist import MAX_REASON_CHARS, clean_reason
+
+    assert len(clean_reason("Tutor " + "keeps explaining things " * 40 + ".")) <= MAX_REASON_CHARS + 3

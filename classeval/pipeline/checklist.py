@@ -200,6 +200,23 @@ def _mask_and_cap_quote(text: str, max_words: int = 15) -> str:
 
 MIN_QUOTE_WORDS = 4  # shorter quotes fuzzy-match almost any line, so they prove nothing
 
+_QUOTED = re.compile(r'["“”][^"“”]*["“”]')
+_UNSAFE_REASON = re.compile(r"https?:|www\.|[<>{}\[\]`]|\\", re.IGNORECASE)
+MAX_REASON_CHARS = 200
+
+
+def clean_reason(text: str) -> str:
+    """Sanitise the model's one-sentence reason: no quoted speech (a paraphrase must not replay what a child
+    said), names masked, first sentence only, bounded length, and nothing that looks like markup or a link."""
+    text = " ".join(_QUOTED.sub("", str(text)).replace('"', "").split())
+    text = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    if not text or _UNSAFE_REASON.search(text):
+        return ""
+    text = mask_names(text)
+    if len(text) > MAX_REASON_CHARS:
+        text = text[:MAX_REASON_CHARS].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+    return text
+
 
 def chunk_transcript(
     tr: Transcript,
@@ -404,7 +421,7 @@ def reduce_chunks(
                     dimension=dim,
                     verdict=it.get("verdict", "not_observed"),
                     evidence=evidence,
-                    reason=mask_names(str(it.get("reason", ""))[:240]),
+                    reason=clean_reason(str(it.get("reason", ""))),
                 )
                 candidates.append(verify_evidence(raw_item, tr, tutor))
         reduced_items[dim] = _pick_verdict(dim, candidates)
