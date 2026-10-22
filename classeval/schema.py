@@ -165,6 +165,38 @@ class DimensionScore(BaseModel):
     note: str | None = None
 
 
+class ExchangeExample(BaseModel):
+    """One tutor question with how it went. `question` is the tutor's own words (masked, short); the child's
+    answer is never quoted, only measured."""
+
+    t_s: float
+    question: str
+    kind: str  # open | closed
+    answered: bool
+    wait_s: float | None = None
+    answer_words: int | None = None
+    feedback: str = "none"  # praise | correction | explanation | follow_up_question | acknowledgement | moved_on | none
+
+
+class InteractionStats(BaseModel):
+    """Question - answer - feedback facts. Type counts are None when word lists do not apply (other languages)."""
+
+    questions_total: int
+    content_questions: int  # open + closed (attention and checking questions excluded)
+    open_questions: int | None = None
+    closed_questions: int | None = None
+    checking_questions: int | None = None  # "do you understand?"
+    attention_questions: int | None = None  # "can you hear me?"
+    content_answered_pct: float | None = None
+    median_wait_s: float | None = None
+    median_answer_words: float | None = None
+    feedback_pct: float | None = None  # of answered content questions, share where the tutor reacted explicitly
+    feedback_mix: dict[str, int] = Field(default_factory=dict)
+    student_initiated: int = 0
+    longest_exchange_chain: int = 0
+    examples: list[ExchangeExample] = Field(default_factory=list)
+
+
 class TimelineBin(BaseModel):
     """One minute of the class: seconds the tutor and the students spoke, and the dominant screen state."""
 
@@ -199,6 +231,7 @@ class ClassStats(BaseModel):
     last_tutor_speech_s: float | None = None
     screen_pct: dict[str, float] = Field(default_factory=dict)
     timeline: list[TimelineBin] = Field(default_factory=list)
+    interaction: InteractionStats | None = None
 
 
 class Report(BaseModel):

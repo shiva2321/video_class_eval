@@ -8,6 +8,7 @@ from classeval.schema import (
     AudioFacts,
     ClassStats,
     Diarization,
+    InteractionStats,
     MediaInfo,
     Report,
     Transcript,
@@ -160,6 +161,80 @@ def _stat_card(value: str, label: str) -> str:
     )
 
 
+_FEEDBACK_LABELS = {
+    "praise": "praise",
+    "correction": "correction",
+    "explanation": "explanation",
+    "follow_up_question": "follow-up question",
+    "acknowledgement": "acknowledgement",
+    "moved_on": "carried on without reacting",
+    "none": "no reaction",
+    "unknown": "n/a",
+}
+
+
+def _render_interaction(it: InteractionStats | None) -> str:
+    """Questions and answers panel: what was asked, how it was answered, what the tutor did next."""
+    if it is None or it.questions_total == 0:
+        return ""
+
+    def pct(v: float | None) -> str:
+        return "n/a" if v is None else f"{v:.0f}%"
+
+    typed = it.open_questions is not None
+    cards = [
+        _stat_card(str(it.content_questions), "content questions"),
+        _stat_card(pct(it.content_answered_pct), "answered by a student"),
+        _stat_card("n/a" if it.median_wait_s is None else f"{it.median_wait_s:.1f} s", "typical wait for the answer"),
+        _stat_card("n/a" if it.median_answer_words is None else f"{it.median_answer_words:.0f} words", "typical answer length"),
+        _stat_card(pct(it.feedback_pct), "answers the tutor reacted to"),
+        _stat_card(str(it.student_initiated), "student remarks nobody asked for"),
+        _stat_card(str(it.longest_exchange_chain), "longest run of question-answer rounds"),
+    ]
+    types_html = ""
+    if typed:
+        parts = [
+            (it.open_questions, "open (why / how)"),
+            (it.closed_questions, "closed"),
+            (it.checking_questions, 'checking understanding ("any doubts?")'),
+            (it.attention_questions, 'attention or technical ("can you hear me?")'),
+        ]
+        types_html = (
+            '<div class="legend">'
+            + "".join(f"<span class=\"legend-item\"><strong>{n}</strong>&nbsp;{html.escape(label)}</span>" for n, label in parts)
+            + "</div>"
+        )
+    mix_html = ""
+    if it.feedback_mix:
+        mix_html = (
+            '<div class="tl-label">What the tutor did after an answer</div><div class="legend">'
+            + "".join(
+                f"<span class=\"legend-item\"><strong>{n}</strong>&nbsp;{html.escape(_FEEDBACK_LABELS.get(k, k))}</span>"
+                for k, n in it.feedback_mix.items()
+            )
+            + "</div>"
+        )
+    examples_html = ""
+    if it.examples:
+        rows = []
+        for ex in it.examples:
+            outcome = (
+                f"answered after {ex.wait_s:.1f} s with {ex.answer_words} words; tutor reaction: "
+                f"{html.escape(_FEEDBACK_LABELS.get(ex.feedback, ex.feedback))}"
+                if ex.answered and ex.wait_s is not None
+                else "not answered by a student"
+            )
+            rows.append(
+                f"<li><span class=\"chip\">{_fmt_ts(ex.t_s)}</span> &ldquo;{html.escape(ex.question)}&rdquo; "
+                f"&mdash; {html.escape(ex.kind)} question; {outcome}</li>"
+            )
+        examples_html = '<div class="tl-label">Examples (tutor\'s own words; children\'s answers are never quoted)</div><ul class="topic-list">' + "".join(rows) + "</ul>"
+    return (
+        '<div class="tl-label">Questions and answers</div>'
+        f'<div class="stat-grid">{"".join(cards)}</div>{types_html}{mix_html}{examples_html}'
+    )
+
+
 def _render_glance(stats: ClassStats | None, topics: list[str]) -> str:
     """The 'Class at a glance' section: countable facts, two minute-by-minute strips and the topics covered."""
     if stats is None:
@@ -219,6 +294,7 @@ def _render_glance(stats: ClassStats | None, topics: list[str]) -> str:
     <div class="section">
       <div class="section-title">Class at a glance</div>
       <div class="stat-grid">{"".join(cards)}</div>
+      {_render_interaction(stats.interaction)}
       <div class="tl-label">Who spoke, minute by minute</div>
       <div class="tl-speech">{"".join(speech_cols)}</div>
       <div class="legend"><span class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>tutor</span>

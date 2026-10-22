@@ -5,10 +5,10 @@ sampled frames. No text is stored: names are only counted, never kept.
 """
 
 import math
-import re
 from collections import Counter
 
 from classeval.pipeline.checklist import find_names
+from classeval.pipeline.interaction import OPEN_QUESTION, PRAISE, analyze, sentences
 from classeval.schema import (
     AudioFacts,
     ClassStats,
@@ -24,18 +24,6 @@ MONOLOGUE_GAP_S = 3.0  # tutor utterances closer than this belong to one uninter
 MIN_BREAKER_WORDS = 2  # a student utterance of at least this many words interrupts a tutor stretch
 MIN_STUDENT_VOICE_WORDS = 25  # a voice counts as a distinct student once it has said this many words
 MAX_TIMELINE_MINUTES = 360
-
-_PRAISE = re.compile(
-    r"(?<!\w)(great|excellent|well done|very good|very nice|good job|nice job|perfect|correct|wonderful|"
-    r"awesome|brilliant|super|exactly|that's right|that is right)(?!\w)",
-    re.IGNORECASE,
-)
-_OPEN_QUESTION = re.compile(
-    r"^\W*(?:(?:okay|ok|so|now|and|well|alright)\b[\s,]*)*"
-    r"(why|how|what do you think|what would|what if|can you explain|explain|tell me why|what makes)",
-    re.IGNORECASE,
-)
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 _SCREEN_GROUPS = {
     "BOARD_SHARE": "board",
@@ -53,18 +41,14 @@ def screen_group(state: str) -> str:
     return _SCREEN_GROUPS.get(state, "NONE")
 
 
-def _sentences(text: str) -> list[str]:
-    return [s for s in _SENTENCE_END.split(text.strip()) if s]
-
-
 def _count_questions(texts: list[str]) -> tuple[int, int]:
     """(questions, open questions) among the sentences of the given utterances."""
     questions = open_questions = 0
     for text in texts:
-        for sentence in _sentences(text):
+        for sentence in sentences(text):
             if sentence.endswith("?"):
                 questions += 1
-                if _OPEN_QUESTION.match(sentence):
+                if OPEN_QUESTION.match(sentence):
                     open_questions += 1
     return questions, open_questions
 
@@ -177,10 +161,11 @@ def compute(
         student_utterances=len(student_segs),
         students_addressed_by_name=len(names) if text_supported else None,
         name_address_count=address_utterances if text_supported else None,
-        praise_count=sum(len(_PRAISE.findall(s.text)) for s in tutor_segs) if text_supported else None,
+        praise_count=sum(len(PRAISE.findall(s.text)) for s in tutor_segs) if text_supported else None,
         longest_tutor_monologue_s=round(_longest_tutor_stretch(segments, tutor), 1),
         first_tutor_speech_s=round(min(t.start for t in tutor_turns), 1) if tutor_turns else None,
         last_tutor_speech_s=round(max(t.end for t in tutor_turns), 1) if tutor_turns else None,
         screen_pct=screen_pct,
         timeline=_timeline(d, video, duration_s),
+        interaction=analyze(segments, tutor, text_supported),
     )
