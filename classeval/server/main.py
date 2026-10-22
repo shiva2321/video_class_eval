@@ -59,8 +59,9 @@ def create_app(
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    async def healthz(request: Request) -> dict[str, str | bool]:
+        # "forwarded" tells the operator whether the tunnel passes the real client address (per-client limits).
+        return {"status": "ok", "forwarded": bool(request.headers.get("x-forwarded-for"))}
 
     @app.get("/", response_class=FileResponse)
     async def index() -> FileResponse:

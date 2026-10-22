@@ -19,7 +19,7 @@ async def test_healthz_open(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/healthz")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        assert resp.json() == {"status": "ok", "forwarded": False}
 
 
 @pytest.mark.asyncio

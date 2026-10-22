@@ -41,11 +41,25 @@ class FailureTracker:
     A locked client is refused even with the correct code, so the lockout cannot be used as a guessing oracle.
     """
 
-    def __init__(self, max_failures: int = 10, window_s: float = 300.0, clock: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        max_failures: int = 10,
+        window_s: float = 300.0,
+        clock: Callable[[], float] = time.monotonic,
+        max_keys: int = 10_000,
+    ):
         self.max_failures = max_failures
         self.window_s = window_s
+        self.max_keys = max_keys
         self._clock = clock
         self._failures: dict[str, list[float]] = defaultdict(list)
+
+    def _gc(self) -> None:
+        """Bound memory: drop clients with no recent failure; if still too many, start over."""
+        cutoff = self._clock() - self.window_s
+        self._failures = defaultdict(list, {k: v for k, v in self._failures.items() if v and v[-1] >= cutoff})
+        if len(self._failures) >= self.max_keys:
+            self._failures.clear()
 
     def _recent(self, key: str) -> list[float]:
         cutoff = self._clock() - self.window_s
@@ -57,6 +71,8 @@ class FailureTracker:
         return len(self._recent(key)) >= self.max_failures
 
     def record(self, key: str) -> None:
+        if len(self._failures) >= self.max_keys:
+            self._gc()
         self._recent(key).append(self._clock())
 
 
@@ -72,6 +88,13 @@ def client_ip(request: Request) -> str:
         if forwarded:
             return forwarded.split(",")[-1].strip() or host
     return host
+
+
+def is_shared_client(request: Request) -> bool:
+    """True when visitors cannot be told apart: the peer is loopback and no proxy-added address is present.
+    Locking such a key out would lock out everybody, so the lockout does not apply to it."""
+    host = request.client.host if request.client else "127.0.0.1"
+    return host in ("127.0.0.1", "::1") and not request.headers.get("x-forwarded-for")
 
 
 def get_auth_dependency(
@@ -90,7 +113,8 @@ def get_auth_dependency(
         ip = client_ip(request)
         active_limiter.check(ip)
 
-        if active_failures.is_locked(ip):
+        lockout_applies = not is_shared_client(request)
+        if lockout_applies and active_failures.is_locked(ip):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many failed attempts. Try again in a few minutes.",
@@ -98,8 +122,11 @@ def get_auth_dependency(
             )
 
         provided_code = header_code or request.cookies.get("access")
-        if not provided_code or not hmac.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):
-            active_failures.record(ip)
+        if not provided_code:  # not a guess: never counts towards a lockout
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        if not hmac.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):
+            if lockout_applies:
+                active_failures.record(ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized",
