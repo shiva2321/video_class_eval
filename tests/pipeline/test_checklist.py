@@ -396,4 +396,6 @@ def test_no_identified_tutor_fails_closed_without_calling_the_model(settings):
     )
     d = Diarization(turns=[], tutor=None, tutor_confidence=0.0, method="ecapa", n_speakers=1)
     facts = TranscriptFacts(detections={}, distinct_responders=0, question_reply_rate=None, question_count=0)
-    assert extract(tr, d, facts, Boom(), settings).degraded
+    res = extract(tr, d, facts, Boom(), settings)
+    assert res.degraded
+    assert all(item.verdict == "not_observed" and not item.evidence for item in res.items.values())

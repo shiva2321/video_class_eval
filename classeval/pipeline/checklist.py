@@ -533,7 +533,15 @@ def extract(
             degraded=True,
         )
 
-    if llm is None or d.tutor is None:  # without an identified tutor no quote can be attributed: fail closed
+    if d.tutor is None:  # no quote can be attributed to the tutor: nothing is observed, nothing is quoted
+        return ChecklistResult(
+            items={dim: ChecklistItem(dimension=dim, verdict="not_observed", evidence=[]) for dim in CHECKLIST_DIMS},
+            strengths=[],
+            improvements=[],
+            degraded=True,
+        )
+
+    if llm is None:
         return _fallback_from_tfacts(tfacts, tr, d)
 
     chunks = chunk_transcript(tr, d, minutes=8.0)

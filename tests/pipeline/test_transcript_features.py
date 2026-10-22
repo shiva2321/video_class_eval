@@ -160,7 +160,7 @@ def test_praise_density_present_but_weight_zero_flag(settings):
 
 def test_empty_transcript_no_crash(settings):
     tr = Transcript(language="en", language_confidence=0.99, asr_model="w", segments=[])
-    d = Diarization(turns=[], tutor=None, tutor_confidence=0.0, method="ecapa", n_speakers=0)
+    d = Diarization(turns=[], tutor="S0", tutor_confidence=0.5, method="ecapa", n_speakers=1)
 
     facts = transcript_features.compute(tr, d, settings)
     assert facts.distinct_responders == 0
@@ -169,3 +169,26 @@ def test_empty_transcript_no_crash(settings):
     for det in facts.detections.values():
         assert det.assessed is True
         assert det.score in (0.0, None)
+
+
+def test_no_identified_tutor_means_nothing_is_assessed_or_quoted():
+    import os
+
+    from classeval.config import load_settings
+    from classeval.pipeline.transcript_features import compute
+    from classeval.schema import Diarization, Segment, Transcript
+
+    os.environ.setdefault("ACCESS_CODE", "test_features_token")
+    settings = load_settings("config.yaml", env_file=None)
+    tr = Transcript(
+        language="en",
+        language_confidence=0.95,
+        asr_model="t",
+        segments=[
+            Segment(start=5, end=8, text="Hello everyone welcome to class", speaker="S1"),
+            Segment(start=40, end=44, text="I did my homework yesterday", speaker="S2"),
+        ],
+    )
+    d = Diarization(turns=[], tutor=None, tutor_confidence=0.0, method="ecapa", n_speakers=2)
+    facts = compute(tr, d, settings)
+    assert all(not det.assessed and not det.hits for det in facts.detections.values())

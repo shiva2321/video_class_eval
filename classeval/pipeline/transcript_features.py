@@ -90,7 +90,9 @@ def compute(tr: Transcript, d: Diarization, settings: Settings) -> TranscriptFac
     logprobs = [s.avg_logprob for s in segments if s.avg_logprob is not None]
     median_lp = float(np.median(logprobs)) if logprobs else 0.0
 
-    unreliable = tr.language_confidence < 0.5 or (logprobs and median_lp < -1.0)
+    # Without an identified tutor nothing can be attributed to the tutor, and children's speech must never be
+    # quoted as tutor speech, so every detector is "not assessed" (fail closed).
+    unreliable = tr.language_confidence < 0.5 or (logprobs and median_lp < -1.0) or tutor_speaker is None
     if unreliable or not segments:
         default_dets = {
             "greeting_opening": Detection(assessed=not unreliable, score=0.0 if not unreliable else None, hits=[]),
