@@ -42,6 +42,8 @@ def main() -> None:
     parser.add_argument("--runs", required=True, type=Path, help="Directory containing eval run outputs")
     parser.add_argument("--truth", required=False, type=Path, default=None, help="YAML file with checklist truth")
     parser.add_argument("--out", required=False, type=Path, default=None, help="Output path for fitted cutoffs JSON")
+    parser.add_argument("--fixed", action="store_true", help="Score with the cutoffs in config.yaml instead of fitting")
+    parser.add_argument("--summary", type=Path, default=None, help="Write the aggregate numbers to this JSON file")
     args = parser.parse_args()
 
     runs_dir = args.runs.resolve()
@@ -90,8 +92,13 @@ def main() -> None:
     hard_labels = [r["label"] for r in hard_runs]
     soft_scores = [r["score"] for r in soft_runs]
 
-    cutoffs = fit_cutoffs(hard_scores, hard_labels, soft_scores)
-    loo_preds = loo_predict(hard_scores, hard_labels, soft_scores)
+    if args.fixed:
+        configured = yaml.safe_load((_ROOT / "config.yaml").read_text(encoding="utf-8"))["cutoffs"]
+        cutoffs = (float(configured["poor_lt"]), float(configured["average_lt"]), float(configured["good_lt"]))
+        loo_preds = [grade_of(s, cutoffs) for s in hard_scores]
+    else:
+        cutoffs = fit_cutoffs(hard_scores, hard_labels, soft_scores)
+        loo_preds = loo_predict(hard_scores, hard_labels, soft_scores)
 
     # 2. Compute metrics
     exact, within_one = exact_and_within_one(hard_labels, loo_preds)
@@ -113,9 +120,11 @@ def main() -> None:
         print("\t".join(str(val) for val in row))
 
     # Soft classes status (must be Average or below -> score < c2, grade <= 1)
+    soft_ok = 0
     for r in soft_runs:
         pred_g = grade_of(r["score"], cutoffs)
         status = 1 if pred_g <= 1 else 0
+        soft_ok += status
         print(f"{r['id']}\tsoft\t{r['score']:.1f}\t{pred_g}\t{status}")
 
     # Cutoffs
@@ -132,6 +141,7 @@ def main() -> None:
         }
         out_path.write_text(json.dumps(cutoffs_data, indent=2), encoding="utf-8")
 
+    agreement: dict[str, dict[str, float | int]] = {}
     # 4. Per-dimension agreement with ground truth if provided
     if args.truth and args.truth.exists():
         try:
@@ -158,6 +168,23 @@ def main() -> None:
                                 agree += 1
                 frac = round(float(agree) / float(count), 4) if count > 0 else 0.0
                 print(f"{dim}\t{count}\t{frac:.4f}")
+                agreement[dim] = {"classes": count, "agreement": frac}
+
+    if args.summary:
+        args.summary.parent.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "mode": "configured_cutoffs" if args.fixed else "leave_one_out_fit",
+            "labelled_classes": len(hard_runs),
+            "soft_labelled_classes": len(soft_runs),
+            "exact": exact,
+            "within_one": within_one,
+            "kendall_tau": tau,
+            "confusion_rows_true_cols_predicted": conf_mat,
+            "soft_classes_at_or_below_average": soft_ok,
+            "cutoffs": {"poor_lt": cutoffs[0], "average_lt": cutoffs[1], "good_lt": cutoffs[2]},
+            "dimension_agreement": agreement,
+        }
+        args.summary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -27,9 +27,9 @@ class GroupsConfig(BaseModel):
 
 
 class CutoffsConfig(BaseModel):
-    poor_lt: float = 45.0
-    average_lt: float = 62.0
-    good_lt: float = 78.0
+    poor_lt: float = 65.0
+    average_lt: float = 75.0
+    good_lt: float = 80.0
 
 
 class LimitsConfig(BaseModel):
