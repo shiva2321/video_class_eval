@@ -2,9 +2,11 @@ import html
 from datetime import UTC, datetime
 
 from classeval.pipeline.checklist import ChecklistResult
+from classeval.pipeline.class_stats import screen_group
 from classeval.pipeline.scoring import ScoreResult
 from classeval.schema import (
     AudioFacts,
+    ClassStats,
     Diarization,
     MediaInfo,
     Report,
@@ -97,6 +99,7 @@ def build_report(
         dimensions=result.dimensions,
         strengths=checklist.strengths,
         improvements=checklist.improvements,
+        topics=list(checklist.topics),
         technical_flags=result.flags,
         not_assessed=not_assessed,
         downweighted_signals=downweighted_signals,
@@ -112,6 +115,100 @@ def _fmt_ts(sec: float | None) -> str:
     m = int(sec // 60)
     s = int(sec % 60)
     return f"[{m:02d}:{s:02d}]"
+
+
+_SCREEN_COLORS = {
+    "board": "#f59e0b",
+    "lesson_video": "#8b5cf6",
+    "face_on_screen": "#3b82f6",
+    "camera_off": "#ef4444",
+    "other": "#94a3b8",
+    "NONE": "#e2e8f0",
+}
+_SCREEN_LABELS = {
+    "board": "chess board / puzzle",
+    "lesson_video": "lesson video",
+    "face_on_screen": "a face on screen",
+    "camera_off": "camera off",
+    "other": "other screen",
+    "NONE": "no frame",
+}
+
+
+def _stat_card(value: str, label: str) -> str:
+    return (
+        f'<div class="stat-card"><div class="stat-value">{html.escape(value)}</div>'
+        f'<div class="stat-label">{html.escape(label)}</div></div>'
+    )
+
+
+def _render_glance(stats: ClassStats | None, topics: list[str]) -> str:
+    """The 'Class at a glance' section: countable facts, two minute-by-minute strips and the topics covered."""
+    if stats is None:
+        return ""
+
+    def pct(v: float | None) -> str:
+        return "n/a" if v is None else f"{v:.0f}%"
+
+    cards = [
+        _stat_card(f"{stats.duration_min:.0f} min", "class length"),
+        _stat_card(pct(stats.tutor_talk_pct), "tutor speaking"),
+        _stat_card(pct(stats.student_talk_pct), "students speaking"),
+        _stat_card(pct(stats.silence_pct), "silence"),
+        _stat_card(str(stats.student_voices), "student voices heard"),
+        _stat_card(f"{stats.tutor_questions} ({stats.open_questions} open)", "tutor questions"),
+        _stat_card(pct(stats.question_reply_pct), "questions answered"),
+        _stat_card("n/a" if stats.median_wait_s is None else f"{stats.median_wait_s:.1f} s", "typical wait for an answer"),
+        _stat_card(str(stats.student_questions), "questions from students"),
+        _stat_card(str(stats.students_addressed_by_name), "children called by name"),
+        _stat_card(str(stats.praise_count), "praise moments"),
+        _stat_card(f"{stats.longest_tutor_monologue_s:.0f} s", "longest tutor stretch without a student"),
+        _stat_card(f"{stats.tutor_wpm:.0f}", "tutor words per minute"),
+        _stat_card(f"{stats.student_words_per_min:.0f}", "student words per minute"),
+    ]
+
+    speech_cols = []
+    for k, b in enumerate(stats.timeline):
+        tutor_h = min(100.0, 100.0 * b.tutor_s / 60.0)
+        student_h = min(100.0 - tutor_h, 100.0 * b.student_s / 60.0)
+        speech_cols.append(
+            f'<div class="tl-col" title="minute {k + 1}: tutor {b.tutor_s:.0f} s, students {b.student_s:.0f} s">'
+            f'<div class="tl-student" style="height:{student_h:.1f}%"></div>'
+            f'<div class="tl-tutor" style="height:{tutor_h:.1f}%"></div></div>'
+        )
+    screen_cells = [
+        f'<div class="tl-cell" style="background:{_SCREEN_COLORS.get(screen_group(b.screen) if b.screen != "NONE" else "NONE", "#e2e8f0")}" '
+        f'title="minute {k + 1}: {html.escape(_SCREEN_LABELS.get(b.screen, b.screen))}"></div>'
+        for k, b in enumerate(stats.timeline)
+    ]
+    legend = "".join(
+        f'<span class="legend-item"><span class="legend-dot" style="background:{_SCREEN_COLORS[g]}"></span>'
+        f"{html.escape(_SCREEN_LABELS[g])} {stats.screen_pct.get(g, 0):.0f}%</span>"
+        for g in ("board", "lesson_video", "face_on_screen", "camera_off", "other")
+        if stats.screen_pct.get(g)
+    )
+    topics_html = (
+        '<div class="tl-label">What the class covered</div><ul class="topic-list">'
+        + "".join(f"<li>{html.escape(t)}</li>" for t in topics)
+        + "</ul>"
+        if topics
+        else ""
+    )
+    return f"""
+    <div class="section">
+      <div class="section-title">Class at a glance</div>
+      <div class="stat-grid">{"".join(cards)}</div>
+      <div class="tl-label">Who spoke, minute by minute</div>
+      <div class="tl-speech">{"".join(speech_cols)}</div>
+      <div class="legend"><span class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>tutor</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#10b981"></span>students</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#e2e8f0"></span>silence</span></div>
+      <div class="tl-label">What was on screen, minute by minute</div>
+      <div class="tl-screen">{"".join(screen_cells)}</div>
+      <div class="legend">{legend}</div>
+      {topics_html}
+    </div>
+"""
 
 
 def render_html(report: Report) -> str:
@@ -233,6 +330,27 @@ def render_html(report: Report) -> str:
     .flag-badge {{ background: #fee2e2; color: #991b1b; margin-right: 6px; }}
     .ok-badge {{ background: #f1f5f9; color: #475569; }}
     .empty-state {{ color: #94a3b8; font-style: italic; font-size: 14px; }}
+    .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }}
+    .stat-card {{ padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }}
+    .stat-value {{ font-size: 20px; font-weight: 800; color: #0f172a; }}
+    .stat-label {{ font-size: 12px; color: #64748b; }}
+    .tl-label {{ font-size: 13px; font-weight: 600; color: #475569; margin: 14px 0 6px; }}
+    .tl-speech {{ display: flex; align-items: flex-end; gap: 1px; height: 56px; }}
+    .tl-col {{ flex: 1; height: 100%; display: flex; flex-direction: column-reverse; background: #f1f5f9; min-width: 2px; }}
+    .tl-tutor {{ background: #3b82f6; }}
+    .tl-student {{ background: #10b981; }}
+    .tl-screen {{ display: flex; gap: 1px; height: 16px; }}
+    .tl-cell {{ flex: 1; min-width: 2px; }}
+    .legend {{ display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: 12px; color: #475569; }}
+    .legend-dot {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }}
+    .topic-list {{ padding-left: 20px; font-size: 14px; color: #334155; }}
+    @media (max-width: 700px) {{
+      body {{ padding: 8px; }}
+      .grid-2 {{ grid-template-columns: 1fr; }}
+      .section {{ padding: 16px; }}
+      .meta-row {{ flex-wrap: wrap; gap: 8px 16px; }}
+      .grade-display {{ font-size: 30px; }}
+    }}
     .footer {{ padding: 16px 32px; background: #f8fafc; font-size: 12px; color: #64748b; display: flex; justify-content: space-between; }}
   </style>
 </head>
@@ -253,6 +371,7 @@ def render_html(report: Report) -> str:
       <div class="section-title">Executive Summary</div>
       <div class="summary-text">{html.escape(report.summary)}</div>
     </div>
+    {_render_glance(report.stats, report.topics)}
 
     <div class="section">
       <div class="section-title">Rubric Dimension Scores</div>

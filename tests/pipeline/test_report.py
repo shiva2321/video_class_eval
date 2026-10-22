@@ -236,3 +236,39 @@ def test_report_strengths_improvements_each_have_evidence(settings):
     assert len(rep.improvements) > 0
     for imp in rep.improvements:
         assert len(imp.evidence) > 0
+
+
+def test_report_with_stats_renders_the_glance_section_safely(settings):
+    from classeval.pipeline import class_stats
+
+    media, tr, d, audio, video, tfacts, checklist, score_res = _make_report_inputs(settings)
+    checklist.topics = ["Forks <script>alert(1)</script>"]
+    rep = report.build_report(
+        job_id="test_job_12345",
+        media=media,
+        tr=tr,
+        d=d,
+        audio=audio,
+        video=video,
+        tfacts=tfacts,
+        checklist=checklist,
+        result=score_res,
+        timings_s={},
+        versions={},
+        summary=report.summarize(score_res, checklist),
+    )
+    rep.stats = class_stats.compute(tr, d, audio, video, tfacts, media)
+    page = report.render_html(rep)
+    assert "Class at a glance" in page and "tutor questions" in page and "What the class covered" in page
+    assert "<script>" not in page  # model-written topics are escaped
+    assert "http://" not in page and "https://" not in page
+    assert Report.model_validate_json(rep.model_dump_json()) == rep
+
+
+def test_report_without_stats_has_no_glance_section(settings):
+    media, tr, d, audio, video, tfacts, checklist, score_res = _make_report_inputs(settings)
+    rep = report.build_report(
+        job_id="test_job_12345", media=media, tr=tr, d=d, audio=audio, video=video, tfacts=tfacts,
+        checklist=checklist, result=score_res, timings_s={}, versions={}, summary="s",
+    )
+    assert "Class at a glance" not in report.render_html(rep)

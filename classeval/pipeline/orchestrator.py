@@ -23,6 +23,9 @@ from classeval.pipeline import (
     checklist as checklist_mod,
 )
 from classeval.pipeline import (
+    class_stats as class_stats_mod,
+)
+from classeval.pipeline import (
     diarize as diarize_mod,
 )
 from classeval.pipeline import (
@@ -306,6 +309,7 @@ def execute_pipeline(
         versions,
         summary,
     )
+    rep.stats = class_stats_mod.compute(tr, d, audio_facts, video_facts, tfacts, prepared.info)
     html_content = fns.report_render(rep)
     timings_s["report"] = round(time.monotonic() - t0, 2)
 

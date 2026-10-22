@@ -460,3 +460,32 @@ def test_clean_reason_is_bounded():
     from classeval.pipeline.checklist import MAX_REASON_CHARS, clean_reason
 
     assert len(clean_reason("Tutor " + "keeps explaining things " * 40 + ".")) <= MAX_REASON_CHARS + 3
+
+
+def test_find_names_agrees_with_mask_names():
+    from classeval.pipeline.checklist import find_names, mask_names
+
+    text = "Hello Gautham, how are you? Well done Shrithik, take the Knight"
+    assert find_names(text) == ["Gautham", "Shrithik"]
+    assert mask_names(text) == "Hello [Name], how are you? Well done [Name], take the Knight"
+    assert find_names("Hello everyone, let us start") == []
+
+
+def test_topics_are_collected_cleaned_and_deduplicated():
+    from classeval.pipeline.checklist import reduce_chunks
+    from classeval.schema import Segment, Transcript
+
+    tr = Transcript(
+        language="en",
+        language_confidence=0.9,
+        asr_model="t",
+        segments=[Segment(start=1, end=3, text="Today we study forks", speaker="S0")],
+    )
+    chunks = [
+        {"topic": "Forks and double attacks.", "items": [], "strengths": [], "improvements": []},
+        {"topic": "forks and double attacks", "items": [], "strengths": [], "improvements": []},
+        {"topic": 'Practice "I hate chess" puzzles with Gautham', "items": [], "strengths": [], "improvements": []},
+        {"topic": "", "items": [], "strengths": [], "improvements": []},
+    ]
+    res = reduce_chunks(chunks, [(0.0, 480.0)] * 4, tr, tutor="S0")
+    assert res.topics == ["Forks and double attacks", "Practice puzzles with [Name]"]

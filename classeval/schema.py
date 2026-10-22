@@ -165,6 +165,42 @@ class DimensionScore(BaseModel):
     note: str | None = None
 
 
+class TimelineBin(BaseModel):
+    """One minute of the class: seconds the tutor and the students spoke, and the dominant screen state."""
+
+    tutor_s: float
+    student_s: float
+    screen: str  # dominant ScreenState in that minute, or "NONE" when no frame was sampled
+
+
+class ClassStats(BaseModel):
+    """Objective, countable facts about what happened in the class (the report's "at a glance" section)."""
+
+    duration_min: float
+    tutor_talk_pct: float
+    student_talk_pct: float
+    silence_pct: float
+    tutor_words: int
+    student_words: int
+    tutor_wpm: float
+    student_words_per_min: float
+    student_voices: int
+    tutor_questions: int
+    open_questions: int
+    question_reply_pct: float | None = None
+    median_wait_s: float | None = None
+    student_questions: int
+    student_utterances: int
+    students_addressed_by_name: int
+    name_address_count: int
+    praise_count: int
+    longest_tutor_monologue_s: float
+    first_tutor_speech_s: float | None = None
+    last_tutor_speech_s: float | None = None
+    screen_pct: dict[str, float] = Field(default_factory=dict)
+    timeline: list[TimelineBin] = Field(default_factory=list)
+
+
 class Report(BaseModel):
     job_id: str
     created_at: str
@@ -185,3 +221,5 @@ class Report(BaseModel):
     degraded: bool
     timings_s: dict[str, float] = Field(default_factory=dict)
     versions: dict[str, str] = Field(default_factory=dict)
+    stats: ClassStats | None = None
+    topics: list[str] = Field(default_factory=list)

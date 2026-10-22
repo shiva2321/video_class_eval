@@ -30,6 +30,7 @@ class ChecklistResult(BaseModel):
     items: dict[DimId, ChecklistItem]
     strengths: list[Observation] = Field(default_factory=list)
     improvements: list[Observation] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)  # what the class covered, one short phrase per section
     degraded: bool = False
 
 
@@ -45,6 +46,7 @@ Dimensions, as the tutors' quality reviewers define them:
 - R9 Content moves: revises the previous lesson, solves puzzles with the class, uses topic-related videos or the board well.
 - R10 Homework: the tutor explicitly assigns homework or practice to do after class.
 - R11 Conclusion: a proper closing with a recap of what was learned, a goodbye and a preview of the next class.
+Also give topic: what this chunk is about in at most 10 words (the chess concept or activity).
 For every dimension also give a reason: one plain sentence (at most 25 words) saying why you chose the verdict, based on what the chunk shows.
 Evidence: 1 to 2 items per dimension when the verdict is met, partial or not_met; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (4 to 15 words).
 Also return up to 2 specific strengths and up to 2 specific improvements. Each MUST include 1 to 2 evidence items in the same form (a verbatim TUTOR quote with its t).
@@ -53,6 +55,7 @@ Also return up to 2 specific strengths and up to 2 specific improvements. Each M
 CHECKLIST_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "topic": {"type": "string"},
         "items": {
             "type": "array",
             "maxItems": 7,
@@ -141,7 +144,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["items", "strengths", "improvements"],
+    "required": ["topic", "items", "strengths", "improvements"],
 }
 
 
@@ -161,32 +164,38 @@ _CAP_WORD = re.compile(r"\b([A-Z][a-z]{2,})\b")
 _GREETED = re.compile(r"\b(?i:hello|hi|hey|welcome)[,!]?\s+([A-Z][a-z]+)\b")
 
 
-def mask_names(text: str) -> str:
-    """Mask likely person names so children (and the tutor) are never named in a report.
-
-    Heuristic: any capitalised word that is not an ordinary sentence starter, chess or common word is a
-    name when it appears mid-sentence or as a vocative ("Gautham, what is your move?"). Not perfect
-    (ASR may not capitalise a name), but it errs towards masking.
-    """
-
-    def _greeted(m: re.Match[str]) -> str:
-        word = m.group(1)
-        return m.group(0) if word.lower() in _NOT_NAMES else m.group(0).replace(word, "[Name]")
-
-    text = _GREETED.sub(_greeted, text)
-
-    def _cap(m: re.Match[str]) -> str:
+def _name_spans(text: str) -> list[tuple[int, int]]:
+    """Character spans of likely person names: a capitalised word that is not a sentence starter, chess term or
+    common word is a name when it appears mid-sentence or as a vocative ("Gautham, what is your move?")."""
+    spans: set[tuple[int, int]] = set()
+    for m in _GREETED.finditer(text):
+        if m.group(1).lower() not in _NOT_NAMES:
+            spans.add((m.start(1), m.end(1)))
+    for m in _CAP_WORD.finditer(text):
         word = m.group(1)
         if word.lower() in _NOT_NAMES:
-            return word
+            continue
         before = text[: m.start(1)].rstrip()
         after = text[m.end(1) : m.end(1) + 1]
         sentence_initial = not before or before[-1] in ".!?"
         if sentence_initial and after not in (",", "!", "?"):
-            return word  # an ordinary sentence start, not a vocative
-        return "[Name]"
+            continue  # an ordinary sentence start, not a vocative
+        spans.add((m.start(1), m.end(1)))
+    return sorted(spans)
 
-    return _CAP_WORD.sub(_cap, text)
+
+def find_names(text: str) -> list[str]:
+    """Likely person names in `text` (used only to COUNT how many children were addressed; never stored)."""
+    return [text[a:b] for a, b in _name_spans(text)]
+
+
+def mask_names(text: str) -> str:
+    """Mask likely person names so children (and the tutor) are never named in a report. Not perfect (ASR may
+    not capitalise a name), but it errs towards masking."""
+    masked = text
+    for a, b in reversed(_name_spans(text)):
+        masked = masked[:a] + "[Name]" + masked[b:]
+    return masked
 
 
 def _mask_and_cap_quote(text: str, max_words: int = 15) -> str:
@@ -203,6 +212,7 @@ MIN_QUOTE_WORDS = 4  # shorter quotes fuzzy-match almost any line, so they prove
 _QUOTED = re.compile(r'["“”][^"“”]*["“”]')
 _UNSAFE_REASON = re.compile(r"https?:|www\.|[<>{}\[\]`]|\\", re.IGNORECASE)
 MAX_REASON_CHARS = 200
+MAX_TOPIC_CHARS = 80
 
 
 def clean_reason(text: str) -> str:
@@ -350,6 +360,14 @@ def _verify_observation(obs: Observation, tr: Transcript, tutor: str | None = No
     return Observation(text=mask_names(obs.text), dimension=obs.dimension, evidence=res.evidence)
 
 
+def clean_topic(text: str) -> str:
+    """A short, sanitised topic phrase (same rules as a reason, no trailing full stop, at most 80 characters)."""
+    topic = clean_reason(text).rstrip(".")
+    if len(topic) > MAX_TOPIC_CHARS:
+        topic = topic[:MAX_TOPIC_CHARS].rsplit(" ", 1)[0].rstrip(",;:")
+    return topic
+
+
 def _raw_evidence(ev_raw: dict[str, Any]) -> Evidence | None:
     """Model-provided evidence as an Evidence (capped to 15 words); NOT yet verified or masked."""
     quote = " ".join(str(ev_raw.get("quote", "")).split()[:15])
@@ -429,10 +447,17 @@ def reduce_chunks(
     all_strengths = [o for c in chunk_evals for o in _observations(c.get("strengths", []), tr, tutor)]
     all_improvements = [o for c in chunk_evals for o in _observations(c.get("improvements", []), tr, tutor)]
 
+    topics: list[str] = []
+    for chunk in chunk_evals:
+        topic = clean_topic(str(chunk.get("topic", "")))
+        if topic and topic.lower() not in {t.lower() for t in topics}:
+            topics.append(topic)
+
     return ChecklistResult(
         items=reduced_items,
         strengths=all_strengths[:5],
         improvements=all_improvements[:5],
+        topics=topics[:12],
         degraded=False,
     )
 
