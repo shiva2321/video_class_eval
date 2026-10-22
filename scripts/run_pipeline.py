@@ -14,6 +14,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from classeval.config import load_settings
+from classeval.guard import limit_gpu_memory, start_memory_watchdog
 from classeval.pipeline import orchestrator
 from classeval.schema import Transcript
 
@@ -24,6 +25,10 @@ def main() -> None:
     parser.add_argument("--out", required=True, type=Path, help="Directory to store outputs and reports")
     parser.add_argument("--fast", action="store_true", help="Fast execution mode")
     args = parser.parse_args()
+
+    # A runaway stage must fail fast, never freeze the PC.
+    limit_gpu_memory()
+    start_memory_watchdog()
 
     input_path = args.input.resolve()
     if not input_path.exists():
@@ -45,7 +50,9 @@ def main() -> None:
             settings=settings,
             job_id=out_dir.name or "cli_run",
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        # Class name only: messages can contain recording text. Re-run is cheap, finished stages are cached.
+        print(f"pipeline failed: {type(exc).__name__}", file=sys.stderr)
         sys.exit(1)
 
     wall_s = round(time.monotonic() - t_start, 2)

@@ -9,6 +9,7 @@ import sys
 import time
 
 from classeval.config import Settings, load_settings
+from classeval.guard import limit_gpu_memory, start_memory_watchdog
 from classeval.pipeline import orchestrator
 from classeval.pipeline.orchestrator import StageFns
 from classeval.server.jobs import JobStore
@@ -51,6 +52,8 @@ def run_worker(
 
 
 def main() -> None:
+    limit_gpu_memory()  # a runaway stage must fail fast, never freeze the PC
+    start_memory_watchdog()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

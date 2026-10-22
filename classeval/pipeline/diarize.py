@@ -61,6 +61,9 @@ def assign_speakers(tr: Transcript, d: Diarization) -> Transcript:
     return tr.model_copy(update={"segments": updated_segments})
 
 
+EMBED_BATCH = 64  # windows per ECAPA forward pass
+
+
 def diarize(wav: Path, settings: Settings) -> Diarization:
     """Perform speaker diarization using ECAPA-TDNN embeddings and agglomerative clustering."""
     wav = Path(wav).resolve()
@@ -106,13 +109,16 @@ def diarize(wav: Path, settings: Settings) -> Diarization:
         if not windows:
             return Diarization(turns=[], tutor=None, tutor_confidence=0.0, method="ecapa", n_speakers=0)
 
-        # Extract ECAPA embeddings for each window
-        batch_chunks = torch.tensor(
-            np.stack([w[2] for w in windows]), dtype=torch.float32, device=device
-        )
+        # Extract ECAPA embeddings in small batches: a one-hour class has thousands of windows and a single
+        # batch of all of them exhausts GPU memory.
+        parts: list[np.ndarray] = []
         with torch.no_grad():
-            embeddings = classifier.encode_batch(batch_chunks)  # [N, 1, 192]
-            embeddings = embeddings.squeeze(1).cpu().numpy()
+            for i in range(0, len(windows), EMBED_BATCH):
+                batch = torch.tensor(
+                    np.stack([w[2] for w in windows[i : i + EMBED_BATCH]]), dtype=torch.float32, device=device
+                )
+                parts.append(classifier.encode_batch(batch).squeeze(1).cpu().numpy())  # [B, 192]
+        embeddings = np.concatenate(parts, axis=0)
 
         # Normalize embeddings
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)

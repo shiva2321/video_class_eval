@@ -31,6 +31,7 @@ dependencies = [
     "huggingface-hub",
     "nvidia-ml-py",
     "matplotlib",
+    "psutil>=7.2.2",
 ]
 
 [dependency-groups]

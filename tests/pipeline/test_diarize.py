@@ -110,3 +110,33 @@ def test_two_voices_found_and_tutor_is_dominant(tmp_path, settings):
     assert d.method == "ecapa"
     assert d.n_speakers >= 1
     assert d.tutor is not None
+
+
+def test_embeddings_are_computed_in_bounded_batches(monkeypatch, tmp_path):
+    """A one-hour class has thousands of windows; they must never go through the model in one giant batch."""
+    import numpy as np
+    import soundfile as sf
+    import torch
+
+    from classeval.config import load_settings
+    from classeval.pipeline import diarize as diarize_mod
+
+    sizes: list[int] = []
+
+    class FakeClassifier:
+        def encode_batch(self, batch):
+            sizes.append(int(batch.shape[0]))
+            return torch.randn(batch.shape[0], 1, 16)
+
+    from speechbrain.inference import classifiers
+
+    monkeypatch.setattr(classifiers.EncoderClassifier, "from_hparams", lambda *a, **k: FakeClassifier())
+    monkeypatch.setenv("ACCESS_CODE", "test_diarize_token")
+    settings = load_settings("config.yaml", env_file=None)
+
+    sr = 16000
+    t = np.arange(sr * 300) / sr  # 300 s of a loud tone: about 400 windows
+    sf.write(str(tmp_path / "long.wav"), (0.3 * np.sin(2 * np.pi * 220 * t)).astype("float32"), sr)
+    diarize_mod.diarize(tmp_path / "long.wav", settings)
+
+    assert len(sizes) > 1 and max(sizes) <= diarize_mod.EMBED_BATCH
