@@ -1,15 +1,15 @@
+import logging
 import os
+import sys
+import time
 
 # Worker sets offline environment variables before importing any model code
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-import logging
-import sys
-import time
-
 from classeval.config import Settings, load_settings
 from classeval.guard import limit_gpu_memory, start_memory_watchdog
+from classeval.maintenance import purge_expired, requeue_stale
 from classeval.pipeline import orchestrator
 from classeval.pipeline.orchestrator import StageFns
 from classeval.server.jobs import JobStore
@@ -23,10 +23,39 @@ def run_worker(
     poll_interval: float = 0.5,
     once: bool = False,
     stages: StageFns | None = None,
+    purge_interval_s: float = 1800.0,
 ) -> None:
     """Worker polling loop claiming jobs and executing the pipeline."""
+    try:
+        requeue_stale(store, settings.limits.job_lease_s)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Error requeuing stale jobs: %s", exc)
+
+    try:
+        purge_expired(
+            settings.paths.jobs_dir,
+            settings.paths.uploads_dir,
+            settings.limits.job_ttl_hours,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Error during initial worker purge: %s", exc)
+
+    last_purge = time.monotonic()
+
     while True:
         try:
+            now_mono = time.monotonic()
+            if now_mono - last_purge >= purge_interval_s:
+                try:
+                    purge_expired(
+                        settings.paths.jobs_dir,
+                        settings.paths.uploads_dir,
+                        settings.limits.job_ttl_hours,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Periodic purge failed: %s", exc)
+                last_purge = now_mono
+
             job = store.claim_next()
             if job:
                 logger.info("Claimed job %s", job.id)
@@ -65,6 +94,16 @@ def main() -> None:
         sys.exit(1)
 
     store = JobStore(settings.paths.jobs_dir)
+    try:
+        requeue_stale(store, settings.limits.job_lease_s)
+        purge_expired(
+            settings.paths.jobs_dir,
+            settings.paths.uploads_dir,
+            settings.limits.job_ttl_hours,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Worker startup maintenance error: %s", exc)
+
     logger.info("Starting worker loop on %s...", store.root)
     run_worker(settings, store)
 

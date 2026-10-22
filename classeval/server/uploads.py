@@ -1,12 +1,22 @@
 import json
 import re
 import secrets
+import shutil
 from pathlib import Path
+
+from fastapi import HTTPException, status
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 # The client's file name is display metadata only and is never used as an on-disk name.
 FINAL_NAME = "upload.bin"
 _TMP_NAME = "upload.tmp"
+
+
+class InsufficientDiskSpace(HTTPException):
+    """Raised when free disk space is less than 3x the declared upload size."""
+
+    def __init__(self, detail: str = "Not enough free disk space on the server."):
+        super().__init__(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=detail)
 
 
 class UploadClosed(Exception):
@@ -54,6 +64,9 @@ class UploadStore:
     def init(self, size: int, filename: str) -> str:
         if size > self.max_bytes:
             raise UploadTooLarge(f"Size {size} exceeds limit of {self.max_bytes} bytes")
+
+        if shutil.disk_usage(self.root).free < 3 * size:
+            raise InsufficientDiskSpace("Not enough free disk space on the server.")
 
         upload_id = secrets.token_urlsafe(16)
         up_dir = self.root / upload_id

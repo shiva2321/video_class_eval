@@ -9,11 +9,12 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 JobStatus = Literal["queued", "running", "done", "failed"]
 
-_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+_ID_RE = ID_RE
 
 
 class InvalidId(ValueError):
@@ -26,9 +27,16 @@ class Job(BaseModel):
     stage: str = "queued"
     progress: float = 0.0
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str | None = None
     source: dict[str, Any]
     error: dict[str, Any] | None = None
     eta_s: float | None = None
+
+    @model_validator(mode="after")
+    def _ensure_updated_at(self) -> Self:
+        if not self.updated_at:
+            self.updated_at = self.created_at
+        return self
 
 
 class _FileLock:
@@ -115,6 +123,7 @@ class JobStore:
         return path
 
     def _write_job(self, job: Job) -> None:
+        job.updated_at = datetime.now(UTC).isoformat()
         j_dir = self.job_dir(job.id)
         j_dir.mkdir(parents=True, exist_ok=True)
         target = j_dir / "job.json"

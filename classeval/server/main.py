@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -10,15 +12,19 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from classeval.config import Settings
+from classeval.maintenance import purge_expired
 from classeval.server.auth import FailureTracker, RateLimiter, get_auth_dependency
 from classeval.server.jobs import InvalidId, JobStore
 from classeval.server.uploads import (
     BadChunk,
+    InsufficientDiskSpace,
     MissingChunks,
     UploadClosed,
     UploadStore,
     UploadTooLarge,
 )
+
+logger = logging.getLogger("classeval.server")
 
 
 class InitUploadRequest(BaseModel):
@@ -37,7 +43,57 @@ def create_app(
     failures: FailureTracker | None = None,
 ) -> FastAPI:
     """FastAPI application factory for the Class Quality Assessor server."""
-    app = FastAPI(title="8x8 Class Quality Assessor")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            purge_expired(
+                settings.paths.jobs_dir,
+                settings.paths.uploads_dir,
+                settings.limits.job_ttl_hours,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Startup purge failed: %s", exc)
+
+        async def _purge_loop():
+            while True:
+                try:
+                    await asyncio.sleep(1800)
+                    await asyncio.to_thread(
+                        purge_expired,
+                        settings.paths.jobs_dir,
+                        settings.paths.uploads_dir,
+                        settings.limits.job_ttl_hours,
+                    )
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Periodic purge failed: %s", exc)
+
+        purge_task = asyncio.create_task(_purge_loop())
+        _app.state.purge_task = purge_task
+        try:
+            yield
+        finally:
+            purge_task.cancel()
+            try:
+                await purge_task
+            except asyncio.CancelledError:
+                pass
+
+    app = FastAPI(title="8x8 Class Quality Assessor", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def security_and_cache_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'self'"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        if request.url.path == "/api/jobs" or request.url.path.startswith("/api/jobs/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     # Per-app limiter. The default is generous enough for 8 MiB chunked uploads of a multi-GB file.
     active_limiter = limiter if limiter is not None else RateLimiter(max_requests=600, window_s=60.0)
@@ -79,6 +135,11 @@ def create_app(
         try:
             upload_id = upload_store.init(size=req.size, filename=req.filename)
             return {"upload_id": upload_id}
+        except InsufficientDiskSpace as exc:
+            raise HTTPException(
+                status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                detail=str(exc.detail),
+            ) from exc
         except UploadTooLarge as exc:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
