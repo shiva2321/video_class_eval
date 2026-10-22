@@ -10,7 +10,8 @@ service: the challenge says recordings are confidential and the children in them
 ## What you get
 
 - A web page (works on a phone): enter the access code, choose a recording, watch progress, read the report.
-- The report: grade and confidence; twelve rubric dimensions with a score or "not assessed" and the evidence behind each;
+- The report: grade and confidence; a **"why this grade"** section (a short explanation written from the measured facts, and a
+  table of the points each dimension cost); twelve rubric dimensions with a score or "not assessed" and the evidence behind each;
   strengths and improvements; a "class at a glance" section (who spoke how much, minute by minute; what was on screen; what
   the class covered); a "questions and answers" section (what the tutor asked, whether and how fast students answered, what the
   tutor did next); technical flags. The same data is available as JSON (`/api/jobs/<id>/report.json`).
@@ -27,15 +28,18 @@ upload -> ffmpeg: audio + one frame per 5 s + top-right tutor tile every 20 s
        -> who spoke: ECAPA voice embeddings, clustering, tutor = dominant voice
        -> audio facts: loudness, clipping, noise, talk shares, pauses, response time, pitch/energy variation
        -> screen timeline: CLIP zero-shot (board / lesson video / face), logo template match (8x8 background), camera-off card
+       -> the tutor on screen: a local vision model looks at the tutor's video while they speak (on camera? face clearly visible? light?)
        -> questions and answers: tutor questions, student replies, tutor feedback (timing and counts)
        -> local LLM (Ollama, qwen3-vl:8b-instruct): checklist verdicts + reason + verbatim tutor quotes, per ~8 minute chunk
-       -> verify every quote in the transcript, mask names -> weighted rubric -> grade, confidence, flags -> report
+       -> verify every quote in the transcript, mask names -> weighted rubric -> grade, confidence, flags
+       -> the local model writes "why this grade" from the finished report's facts only; any sentence with a number or name that is
+          not a fact is removed -> report
 ```
 
 | Dimension | Weight | Measured from |
 |---|---|---|
 | R1 8x8 background | 8 | logo match in the full-frame tutor video and in the tutor's small video tile |
-| R2 Tutor camera and lighting | 10 | camera-off time while the tutor speaks, brightness |
+| R2 Tutor camera and lighting | 10 | local vision model: how often the tutor's face is clearly visible while they speak, and the light |
 | R3 Audio clarity | 4 | loudness, clipping, noise |
 | R4 Opening and rapport | 10 | model verdict on the opening words (60 %) + how soon the tutor started speaking (40 %) |
 | R5 New-joiner introductions | 5 | model verdict |
@@ -74,10 +78,14 @@ and, for a public link, [Tailscale](https://tailscale.com).
 ```powershell
 cd video_class_eval
 copy .env.example .env          # then set ACCESS_CODE (at least 10 characters)
-.\scripts\bootstrap.ps1         # environment, models, Ollama model
+.\scripts\bootstrap.ps1         # environment, models (into models\), Ollama model
 .\scripts\run.ps1               # server on 127.0.0.1:8765 and the worker; restarts either if it dies
 .\scripts\funnel.ps1            # public https link through Tailscale Funnel (-DisableSleep keeps the PC awake)
 ```
+
+Machine-specific settings (for example another model folder) go in an untracked `config.local.yaml` that is merged over
+`config.yaml`. On another computer nothing else needs editing: `bootstrap.ps1` needs internet once, and the pipeline then works
+offline. Systems other than Windows are untested.
 
 Open `http://127.0.0.1:8765` (or the Funnel address), enter the code, choose a recording. One job runs at a time; others queue.
 Command line, no server: `.venv\Scripts\python.exe scripts\run_pipeline.py --input <file> --out <folder>`.
@@ -86,39 +94,43 @@ Tests: `.venv\Scripts\python.exe -m pytest -m "not gpu and not ollama and not e2
 ## Speed
 
 Measured on the development PC (RTX 3060 12 GB), full pipeline from scratch (`results/timings.json`): a recording of 56.0 minutes
-took 240.4 s and one of 44.1 minutes took 191.1 s, about 14.0 and 13.8 minutes of recording per minute of processing. The
-language-model checklist (130.05 s and 104.64 s) and speech recognition (43.05 s and 35.72 s) dominate. Memory is bounded
-(audio and embeddings are processed in chunks, GPU memory is capped, a watchdog stops a runaway stage), so a three-hour recording
-takes longer but does not exhaust memory.
+took 302.2 s and one of 44.1 minutes took 232.0 s, about 11.1 and 11.4 minutes of recording per minute of processing, plus the
+short report stage. The language-model checklist (126.38 s and 107.89 s) is the largest part, then the video stage with the
+vision model (70.86 s and 58.95 s) and speech recognition (43.86 s and 35.52 s). Memory is bounded (audio and embeddings are
+processed in chunks, GPU memory is capped, a watchdog stops a runaway stage), so a three-hour recording takes longer but does
+not exhaust memory.
 
 ## Evaluation (read this before trusting the grade)
 
 Ten recordings with a quality folder were available: eight with a clear label (2 excellent, 2 good, 2 average, 2 weak) and
 two "quality issue" classes that should land at Average or below. Labels come from folder names; per-dimension truth comes from
-the tutors' feedback notes (`results/eval_*.json`, produced by `scripts/eval_loo.py`).
+the tutors' feedback notes (`results/eval_*.json`, produced by `scripts/eval_loo.py`). With four grades, guessing is right 0.25
+of the time, and eight classes cannot tell a good system from a lucky one: read every number below as indicative only.
 
 With the configured boundaries (weak is read as Poor):
 
 | | |
 |---|---|
-| exact grade match on the 8 labelled classes | 0.25 |
+| exact grade match on the 8 labelled classes | 0.5 |
 | within one grade | 0.875 |
-| rank correlation of score with label (Kendall tau) | 0.5107 |
+| rank correlation of score with label (Kendall tau) | 0.5893 |
 | "quality issue" classes at Average or below | 2 of 2 |
 
-These are **optimistic**: the boundaries and one rubric rule (the start-time part of R4) were chosen after looking at the same ten
-classes. Fitting the boundaries leave-one-out, as the evaluation script can, gives exact 0.25 and within-one 0.625. Ten classes
-cannot support a precise fit; treat the grade as a coarse signal and the evidence as the real product.
+These are **optimistic**: the boundaries, the start-time part of R4 and the thresholds of the tutor-visibility measure were chosen
+after looking at the same ten classes. Fitting the boundaries leave-one-out, as the evaluation script can, gives exact 0.25 and
+within-one 0.875, so the exact-match figure mostly reflects where the boundaries were put. What improved for a reason, not by
+tuning: letting a vision model look at the tutor raised agreement with the tutors' notes on camera and lighting (R2) from 0 to
+0.67 (3 classes), and looking for the 8x8 background in the tutor's small video tile raised R1 to 8 of 8 classes.
 
-Per-dimension checks against the tutors' notes (a score of 60 or more counts as "present"): R1 background agrees on 8 of 8 classes;
-R4 opening 0.67 (6 classes), R10 homework 0.67 (6), R6 individual interaction 0.57 (7). **R2 camera/lighting, R3 audio clarity and R7
-warmth did not reproduce the issues the tutors flagged (0 of 10)**: those measures read as fine on classes where the reviewers saw
+Per-dimension checks against the tutors' notes (a score of 60 or more counts as "present"): R1 background 8 of 8 classes; R2 camera 0.67
+(3 classes); R4 opening 0.67 (6), R10 homework 0.67 (6), R6 individual interaction 0.57 (7). **R3 audio clarity and R7 warmth did not
+reproduce the issues the tutors flagged (0 of 7 classes together)**: those measures read as fine on classes where the reviewers saw
 problems. They carry weight in the score but are the least trustworthy parts of it.
 
 ### Signals we trusted, and ones we did not
 
-Trusted: the 8x8 logo match (also in the small tutor tile), who spoke when, how soon the tutor started, question and answer
-timing, and verbatim tutor quotes that are verified in the transcript.
+Trusted: the 8x8 logo match (also in the small tutor tile), whether the tutor's face is on screen while they speak, who spoke
+when, how soon the tutor started, question and answer timing, and verbatim tutor quotes that are verified in the transcript.
 Not trusted or down-weighted: praise-word counts (easy to game, little signal), audio "dropouts" (normal pauses in meeting
 recordings produce many), recording length and bitrate, and any model verdict without a verified quote (it falls back to
 "partial" or "not assessed").
@@ -132,7 +144,10 @@ recordings produce many), recording length and bitrate, and any model verdict wi
 - **Subject.** Wording is subject neutral and nothing is chess specific except the screen-state prompts (board, puzzle).
 - **Speakers.** The tutor's voice sometimes splits into two voices, which understates the tutor's talk time and overstates the
   number of students. Children are not identified by name.
-- **Camera.** The tutor's video tile is checked for the 8x8 background; a camera-off card inside the small tile is not detected.
+- **Camera.** While something is shared, the tutor is a small tile that the vision model reads; the tile shows the active speaker,
+  so when speaker detection is off by a few seconds the tile may show someone else.
+- **The written explanation** comes from a small local model. It sees only the report's facts and is cut back to sentences whose
+  numbers and names are facts, but it can still phrase a cause too confidently; the table of points lost next to it is plain arithmetic.
 - **Homework** shared only in the chat window cannot be heard in the recording.
 - **Labels are few and noisy.** See above. The tutors' notes are the only ground truth and mix teaching and video-quality remarks.
 - **Hosting.** The public link works only while this PC is on and the worker is running.
