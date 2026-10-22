@@ -100,19 +100,28 @@ def score(
     dim_notes: dict[str, str | None] = {}
 
     # R1: Branded Backdrop
-    dim_sources["R1"] = ["video:branded_ratio_tutor_speaking"]
+    dim_sources["R1"] = ["video:branded_ratio_tutor_speaking", "video:thumb_branded_share"]
     if not has_video:
         dim_scores["R1"] = None
         dim_notes["R1"] = "No video in this recording"
-    elif video.branded_ratio_tutor_speaking is None:
-        dim_scores["R1"] = None
-        dim_notes["R1"] = "Fewer than 3 frames with tutor speaking and camera on"
     else:
-        norm_branded = _norm(video.branded_ratio_tutor_speaking, 0.0, 0.7)
-        dim_scores["R1"] = 100.0 * norm_branded
-        dim_evidence["R1"] = _measure(
-            f"8x8 backdrop visible on {video.branded_ratio_tutor_speaking:.0%} of the on-camera time the tutor spoke"
-        )
+        # Two views of the same thing: the full-frame tutor video, and the small tutor tile shown during screen shares.
+        full = None if video.branded_ratio_tutor_speaking is None else _norm(video.branded_ratio_tutor_speaking, 0.0, 0.7)
+        tile = None
+        if video.thumb_branded_share is not None and video.thumb_crops >= settings.screen_state.thumb_min_crops:
+            tile = min(1.0, video.thumb_branded_share / settings.screen_state.thumb_present_share)
+        seen = [v for v in (full, tile) if v is not None]
+        if not seen:
+            dim_scores["R1"] = None
+            dim_notes["R1"] = "The tutor's video was not visible often enough to judge the background"
+        else:
+            dim_scores["R1"] = 100.0 * max(seen)
+            parts = []
+            if video.branded_ratio_tutor_speaking is not None:
+                parts.append(f"{video.branded_ratio_tutor_speaking:.0%} of the on-camera time the tutor spoke")
+            if tile is not None and video.thumb_branded_share is not None:
+                parts.append(f"{video.thumb_branded_share:.0%} of sampled moments in the tutor's small video tile")
+            dim_evidence["R1"] = _measure("8x8 backdrop visible on " + " and ".join(parts))
 
     # R2: Camera Presence & Lighting
     dim_sources["R2"] = ["video:camera_off_while_tutor_speaks_s", "video:talking_head_luma_mean"]

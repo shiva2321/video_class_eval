@@ -58,97 +58,55 @@ Evidence: 1 to 2 items per dimension when the verdict is met, partial or not_met
 Also return up to 2 specific strengths and up to 2 specific improvements. Each MUST include 1 to 2 evidence items in the same form (a verbatim TUTOR quote with its t).
 """
 
+_DIMS_ENUM = ["R4", "R5", "R6", "R7", "R9", "R10", "R11"]
+_EVIDENCE_ITEMS = {
+    "type": "array",
+    "maxItems": 2,
+    "items": {
+        "type": "object",
+        "properties": {"t": {"type": "number"}, "quote": {"type": "string", "maxLength": 220}},
+        "required": ["t", "quote"],
+    },
+}
+
+
+def _observation_list() -> dict[str, Any]:
+    return {
+        "type": "array",
+        "maxItems": 2,
+        "items": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "maxLength": 300},
+                "dimension": {"type": "string", "enum": _DIMS_ENUM},
+                "evidence": {**_EVIDENCE_ITEMS, "minItems": 1},
+            },
+            "required": ["text", "dimension", "evidence"],
+        },
+    }
+
+
+# Every string and list is bounded, so a runaway generation is cut by the grammar instead of by the token limit.
 CHECKLIST_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "topic": {"type": "string"},
+        "topic": {"type": "string", "maxLength": 100},
         "items": {
             "type": "array",
             "maxItems": 7,
             "items": {
                 "type": "object",
                 "properties": {
-                    "dimension": {
-                        "type": "string",
-                        "enum": ["R4", "R5", "R6", "R7", "R9", "R10", "R11"],
-                    },
-                    "verdict": {
-                        "type": "string",
-                        "enum": ["met", "partial", "not_met", "not_observed"],
-                    },
-                    "reason": {"type": "string"},
-                    "evidence": {
-                        "type": "array",
-                        "maxItems": 2,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "t": {"type": "number"},
-                                "quote": {"type": "string"},
-                            },
-                            "required": ["t", "quote"],
-                        },
-                    },
+                    "dimension": {"type": "string", "enum": _DIMS_ENUM},
+                    "verdict": {"type": "string", "enum": ["met", "partial", "not_met", "not_observed"]},
+                    "reason": {"type": "string", "maxLength": 250},
+                    "evidence": _EVIDENCE_ITEMS,
                 },
                 "required": ["dimension", "verdict", "reason", "evidence"],
             },
         },
-        "strengths": {
-            "type": "array",
-            "maxItems": 2,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string"},
-                    "dimension": {
-                        "type": "string",
-                        "enum": ["R4", "R5", "R6", "R7", "R9", "R10", "R11"],
-                    },
-                    "evidence": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 2,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "t": {"type": "number"},
-                                "quote": {"type": "string"},
-                            },
-                            "required": ["t", "quote"],
-                        },
-                    },
-                },
-                "required": ["text", "dimension", "evidence"],
-            },
-        },
-        "improvements": {
-            "type": "array",
-            "maxItems": 2,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string"},
-                    "dimension": {
-                        "type": "string",
-                        "enum": ["R4", "R5", "R6", "R7", "R9", "R10", "R11"],
-                    },
-                    "evidence": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 2,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "t": {"type": "number"},
-                                "quote": {"type": "string"},
-                            },
-                            "required": ["t", "quote"],
-                        },
-                    },
-                },
-                "required": ["text", "dimension", "evidence"],
-            },
-        },
+        "strengths": _observation_list(),
+        "improvements": _observation_list(),
     },
     "required": ["topic", "items", "strengths", "improvements"],
 }
@@ -401,6 +359,12 @@ def _observations(raw_list: list[dict[str, Any]], tr: Transcript, tutor: str | N
     return out
 
 
+_NOTHING_SEEN: dict[str, str] = {
+    "R4": "No greeting or friendly talk was heard before the lesson content began.",
+    "R11": "No recap, goodbye or preview of the next class was heard at the end of the recording.",
+}
+
+
 def _pick_verdict(dim: DimId, candidates: list[ChecklistItem]) -> ChecklistItem:
     """Winner rule: any met with verified evidence wins, else partial, else not_met, else not_observed."""
     for verdict in ("met", "partial", "not_met"):
@@ -448,7 +412,12 @@ def reduce_chunks(
                     reason=clean_reason(str(it.get("reason", ""))),
                 )
                 candidates.append(verify_evidence(raw_item, tr, tutor))
-        reduced_items[dim] = _pick_verdict(dim, candidates)
+        item = _pick_verdict(dim, candidates)
+        analysed = any(chunk_evals[i] for i in allowed_indices if i < n_chunks)
+        if item.verdict == "not_observed" and dim in _NOTHING_SEEN and analysed:
+            # the part of the class where this belongs was read and it was not there: that is a miss, not a gap
+            item = ChecklistItem(dimension=dim, verdict="not_met", evidence=[], reason=_NOTHING_SEEN[dim])
+        reduced_items[dim] = item
 
     all_strengths = [o for c in chunk_evals for o in _observations(c.get("strengths", []), tr, tutor)]
     all_improvements = [o for c in chunk_evals for o in _observations(c.get("improvements", []), tr, tutor)]

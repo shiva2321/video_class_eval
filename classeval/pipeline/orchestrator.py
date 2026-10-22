@@ -41,6 +41,9 @@ from classeval.pipeline import (
     screen_state as screen_state_mod,
 )
 from classeval.pipeline import (
+    thumbnail as thumbnail_mod,
+)
+from classeval.pipeline import (
     transcript_features as transcript_features_mod,
 )
 from classeval.pipeline import (
@@ -75,6 +78,7 @@ class StageFns:
     assign_speakers: Callable[..., Any] = diarize_mod.assign_speakers
     audio: Callable[..., Any] = audio_features_mod.compute
     video: Callable[..., Any] = video_features_mod.compute
+    thumbnail: Callable[..., Any] = thumbnail_mod.branded_share
     tfacts: Callable[..., Any] = transcript_features_mod.compute
     understand: Callable[..., Any] = checklist_mod.extract
     score: Callable[..., Any] = scoring_mod.score
@@ -222,6 +226,8 @@ def execute_pipeline(
         t0 = time.monotonic()
         if prepared.info.has_video and frame_states:
             video_facts = fns.video(frame_states, d, tr, settings, frames=prepared.frames)
+            n_crops, share = fns.thumbnail(input_path, job_dir / "work", settings)
+            video_facts = video_facts.model_copy(update={"thumb_crops": n_crops, "thumb_branded_share": share})
         else:
             video_facts = VideoFacts(
                 states=[],

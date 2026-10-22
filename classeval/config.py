@@ -88,6 +88,13 @@ class ScreenStateConfig(BaseModel):
     logo_scales: list[float] = Field(default_factory=lambda: [0.35, 0.5, 0.7, 1.0, 1.4, 1.6])
     clip_batch_size: int = 32
     clip_prompts: dict[str, list[str]] = Field(default_factory=dict)
+    # The tutor's tile in the top-right corner while something is shared: (x, y, width, height) as frame fractions.
+    thumb_region: tuple[float, float, float, float] = (0.68, 0.0, 0.32, 0.42)
+    thumb_every_s: float = 20.0
+    thumb_scales: list[float] = Field(default_factory=lambda: [0.08, 0.1, 0.13, 0.17, 0.22, 0.28, 0.35, 0.45])
+    thumb_logo_threshold: float = 0.56  # best score without the backdrop stays below ~0.52, with it above ~0.6
+    thumb_present_share: float = 0.15  # the backdrop counts as shown when it appears in this share of the moments
+    thumb_min_crops: int = 5
 
 
 class LanguagesConfig(BaseModel):

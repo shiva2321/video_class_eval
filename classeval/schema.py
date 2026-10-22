@@ -144,6 +144,8 @@ class VideoFacts(BaseModel):
     last5_branded: bool | None
     talking_head_luma_mean: float | None
     n_frames: int
+    thumb_branded_share: float | None = None  # share of sampled moments with the backdrop in the tutor's top-right tile
+    thumb_crops: int = 0
 
 
 class TranscriptFacts(BaseModel):
