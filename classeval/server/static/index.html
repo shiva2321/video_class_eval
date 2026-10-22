@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Class Quality Assessor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo-area">
+        <h1>8x8 Class Assessor</h1>
+        <p class="tagline">Local automated evaluation for online chess classes</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <!-- Access Code Section -->
+      <section class="card auth-card">
+        <label for="accessCode" class="form-label">Access Code</label>
+        <div class="input-group">
+          <input type="password" id="accessCode" class="form-input" placeholder="Enter session access code" autocomplete="off" />
+          <button id="toggleCodeBtn" class="btn btn-secondary" type="button">Show</button>
+        </div>
+      </section>
+
+      <!-- Upload Section -->
+      <section id="uploadSection" class="card upload-card">
+        <h2>Upload Class Recording</h2>
+        <p class="section-desc">Select an MP4, MKV, or AVI recording from your local device.</p>
+        
+        <div id="dropzone" class="dropzone">
+          <div class="dropzone-content">
+            <div class="drop-icon">&#128194;</div>
+            <p class="dropzone-text">Drag &amp; drop video here, or tap to browse</p>
+            <input type="file" id="fileInput" class="file-input" accept="video/*,.mp4,.mkv,.avi,.mov,.webm" />
+            <button type="button" id="browseBtn" class="btn btn-secondary browse-btn">Choose File</button>
+          </div>
+        </div>
+
+        <div id="fileInfo" class="file-info hidden">
+          <div class="file-details">
+            <span class="file-name" id="fileName"></span>
+            <span class="file-size" id="fileSize"></span>
+          </div>
+          <button id="startBtn" class="btn btn-primary btn-block">Start Assessment</button>
+        </div>
+      </section>
+
+      <!-- Processing / Status Section -->
+      <section id="progressSection" class="card progress-card hidden">
+        <h2>Assessment Progress</h2>
+        
+        <div class="progress-block">
+          <div class="progress-label">
+            <span id="progressStatusText">Uploading...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div id="progressBar" class="progress-bar" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="stages-container">
+          <h3>Pipeline Stages</h3>
+          <ul class="stage-list" id="stageList">
+            <li data-stage="queued" class="stage-item"><span class="stage-badge">1</span><span class="stage-name">Queued</span></li>
+            <li data-stage="ingest" class="stage-item"><span class="stage-badge">2</span><span class="stage-name">Ingest &amp; Probe</span></li>
+            <li data-stage="asr" class="stage-item"><span class="stage-badge">3</span><span class="stage-name">Transcription (Whisper)</span></li>
+            <li data-stage="diarize" class="stage-item"><span class="stage-badge">4</span><span class="stage-name">Diarization</span></li>
+            <li data-stage="audio" class="stage-item"><span class="stage-badge">5</span><span class="stage-name">Audio Analysis</span></li>
+            <li data-stage="video" class="stage-item"><span class="stage-badge">6</span><span class="stage-name">Video &amp; Board OCR</span></li>
+            <li data-stage="understand" class="stage-item"><span class="stage-badge">7</span><span class="stage-name">Understanding</span></li>
+            <li data-stage="score" class="stage-item"><span class="stage-badge">8</span><span class="stage-name">Scoring Prior</span></li>
+            <li data-stage="report" class="stage-item"><span class="stage-badge">9</span><span class="stage-name">Generating Report</span></li>
+            <li data-stage="done" class="stage-item"><span class="stage-badge">10</span><span class="stage-name">Complete</span></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Error Section -->
+      <div id="errorCard" class="card error-card hidden">
+        <div class="error-header">
+          <span class="error-icon">&#9888;</span>
+          <h3 id="errorTitle">Action Required</h3>
+        </div>
+        <p id="errorMessage" class="error-message"></p>
+        <button id="dismissErrorBtn" class="btn btn-secondary">Dismiss</button>
+      </div>
+
+      <!-- Report Section -->
+      <section id="reportSection" class="card report-card hidden">
+        <div class="report-header">
+          <h2>Assessment Complete</h2>
+          <button id="newAssessmentBtn" class="btn btn-secondary">Assess Another Class</button>
+        </div>
+        <div class="report-frame-wrapper">
+          <iframe id="reportFrame" class="report-frame" title="Assessment Report"></iframe>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>Local Evaluation Engine &bull; Private &amp; Offline</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
