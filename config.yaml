@@ -1,0 +1,91 @@
+models:
+  whisper: "large-v3-turbo"
+  whisper_dir: 'F:\models\whisper'
+  clip: "openai/clip-vit-base-patch32"
+  ecapa: "speechbrain/spkrec-ecapa-voxceleb"
+  pyannote: "pyannote/speaker-diarization-3.1"
+  llm: "qwen3-vl:8b"
+
+ollama:
+  base_url: "http://127.0.0.1:11434"
+
+weights:
+  R1: 8
+  R2: 10
+  R3: 4
+  R4: 10
+  R5: 5
+  R6: 15
+  R7: 12
+  R8: 15
+  R9: 8
+  R10: 6
+  R11: 4
+  R12: 3
+
+groups:
+  presentation: ["R1", "R2", "R3", "R12"]
+  teaching: ["R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11"]
+
+cutoffs:
+  poor_lt: 45
+  average_lt: 62
+  good_lt: 78
+
+limits:
+  max_upload_bytes: 2684354560
+  max_duration_s: 10800
+  min_duration_s: 600
+  chunk_bytes: 8388608
+  job_ttl_hours: 24
+
+sampling:
+  frame_fps: 0.2
+  frame_width: 640
+  keyframes: 24
+
+lexicon:
+  greeting:
+    - "hello"
+    - "hi"
+    - "good morning"
+    - "good afternoon"
+    - "good evening"
+    - "welcome"
+  rapport:
+    - "how are you"
+    - "how was"
+    - "what did you"
+  self_intro:
+    - "introduce yourself"
+    - "new friend"
+    - "welcome to"
+    - "tell me your name"
+  homework:
+    - "homework"
+    - "home work"
+    - "assignment"
+    - "worksheet"
+    - "practice sheet"
+    - "practice at home"
+    - "do at home"
+  closing:
+    - "bye"
+    - "see you"
+    - "next class"
+    - "thank you"
+    - "well done today"
+
+scoring:
+  branded_ratio_tutor_speaking: [0.0, 0.7]
+  student_words_per_min: [5.0, 45.0]
+  dead_air_per_min: [0.8, 0.05]
+  distinct_responders: [0.0, 5.0]
+  question_reply_rate: [0.2, 0.8]
+  pitch_std_semitones: [1.5, 4.0]
+  energy_cv: [0.4, 1.0]
+  board_share_ratio: [0.15, 0.6]
+
+paths:
+  jobs_dir: "jobs"
+  uploads_dir: "uploads"

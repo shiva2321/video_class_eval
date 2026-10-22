@@ -1,0 +1,62 @@
+[project]
+name = "video-class-eval"
+version = "0.1.0"
+description = "Class quality assessor for 8x8 online chess classes"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+    "faster-whisper>=1.1",
+    "pyannote.audio==3.3.2",
+    "speechbrain>=1.0",
+    "transformers>=4.46",
+    "opencv-python-headless>=4.10",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "librosa",
+    "soundfile",
+    "pyloudnorm",
+    "praat-parselmouth",
+    "rapidfuzz",
+    "pillow",
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    "python-multipart",
+    "sse-starlette",
+    "httpx",
+    "pydantic>=2.8",
+    "pyyaml",
+    "python-dotenv",
+    "huggingface-hub",
+    "nvidia-ml-py",
+    "matplotlib",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchaudio = { index = "pytorch-cu124" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = [
+    "gpu: mark test as requiring a GPU",
+    "ollama: mark test as requiring a running Ollama instance",
+    "e2e: mark test as end-to-end integration test",
+]
