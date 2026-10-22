@@ -19,7 +19,29 @@ FORBIDDEN_EXTS = {
     ".srt",
     ".pdf",
     ".zip",
+    # pictures and audio derived from recordings (children's faces and voices) and cached arrays
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".bmp",
+    ".gif",
+    ".webp",
+    ".tif",
+    ".tiff",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".aac",
+    ".npz",
+    ".npy",
 }
+ALLOWED_PATHS = ("assets/",)  # the 8x8 logo crop lives here; it contains no person
+
+
+def is_forbidden_file(rel_path: str) -> bool:
+    """A media-like file that is not under an allow-listed folder."""
+    rel = rel_path.replace("\\", "/")
+    return Path(rel).suffix.lower() in FORBIDDEN_EXTS and not rel.startswith(ALLOWED_PATHS)
 
 KEY_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
@@ -138,8 +160,7 @@ def run_scan(root: Path) -> tuple[int, str]:
             continue
 
         # Check extension
-        ext = path.suffix.lower()
-        if ext in FORBIDDEN_EXTS:
+        if is_forbidden_file(rel_path):
             category_counts["forbidden_extension"] += 1
             tree_matches.append((rel_path, "forbidden_extension"))
             files_affected.add(rel_path)
@@ -210,7 +231,7 @@ def run_scan(root: Path) -> tuple[int, str]:
     for line in names_output.splitlines():
         if hash_re.match(line):
             current_commit = line
-        elif line.strip() and Path(line.strip()).suffix.lower() in FORBIDDEN_EXTS:
+        elif line.strip() and is_forbidden_file(line.strip()):
             category_counts["forbidden_extension_in_history"] += 1
             if current_commit:
                 commits_affected.add(current_commit)

@@ -145,3 +145,30 @@ def test_flags_media_that_was_committed_and_later_deleted(tmp_path: Path, capsys
 
     assert code == 1
     assert "forbidden_extension_in_history: 1" in out and "forbidden_extension: 0" in out
+
+
+@pytest.mark.parametrize("name", ["frame_000001.jpg", "docs/shot.png", "voices.wav", "embeddings.npz", "face.JPEG"])
+def test_flags_pictures_and_audio_derived_from_recordings(tmp_path: Path, capsys: pytest.CaptureFixture, name: str):
+    git_cmd(tmp_path, "init")
+    target = tmp_path / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"\0 pretend media")
+    git_cmd(tmp_path, "add", "-f", name)
+    git_cmd(tmp_path, "commit", "-m", "Add media")
+
+    code = main(["--root", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert code == 1 and "forbidden_extension: 1" in out
+
+
+def test_the_logo_asset_folder_is_allowed(tmp_path: Path, capsys: pytest.CaptureFixture):
+    git_cmd(tmp_path, "init")
+    logo = tmp_path / "assets" / "logo.png"
+    logo.parent.mkdir()
+    logo.write_bytes(b"\0 pretend logo")
+    git_cmd(tmp_path, "add", "assets/logo.png")
+    git_cmd(tmp_path, "commit", "-m", "Add logo")
+
+    code = main(["--root", str(tmp_path)])
+    assert code == 0 and "forbidden_extension: 0" in capsys.readouterr().out

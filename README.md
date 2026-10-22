@@ -63,7 +63,8 @@ time they speak caps the grade at Average.
 - Local only: the app talks to `127.0.0.1` (Ollama) and nothing else at run time; a test fails if anything tries to leave the
   machine. Models are downloaded once by `scripts/bootstrap.ps1`.
 - Access code on every request; wrong-code lock-out and rate limiting; ids are validated against path tricks; security headers;
-  uploads and working files are deleted when a job ends, finished jobs after 24 hours.
+  the extracted frames and audio (which show and carry the children) are deleted at the end of every run, successful or
+  not; the upload and all working files are deleted when a job ends, and the finished report after 24 hours.
 - The report quotes **only the tutor**, at most 15 words, each quote verified against the transcript, names masked. What children
   said is measured (timing, length), never quoted. A test checks that a phrase spoken by a child never reaches logs or stored files.
 - Logs contain stage names, durations and error class names, never speech.

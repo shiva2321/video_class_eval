@@ -119,7 +119,33 @@ def _clean_gpu(custom_cleanup: Callable[[], None] | None = None) -> None:
             torch.cuda.empty_cache()
 
 
+def _purge_media(job_dir: Path) -> None:
+    """Frames, extracted audio and scratch crops never outlive a run: they show the children and carry their voices."""
+    work = job_dir / "work"
+    for name in ("ingest", "thumbs", "visual"):
+        shutil.rmtree(work / name, ignore_errors=True)
+
+
+def _media_present(prepared: Prepared) -> bool:
+    return prepared.wav is not None and Path(prepared.wav).exists() and all(Path(f.path).exists() for f in prepared.frames)
+
+
 def execute_pipeline(
+    input_path: Path,
+    job_dir: Path,
+    settings: Settings,
+    stages: StageFns | None = None,
+    job_id: str = "pipeline_run",
+    store: JobStore | None = None,
+) -> Report:
+    """Run the pipeline; the extracted frames and audio are removed whether it succeeds or fails."""
+    try:
+        return _execute_pipeline(input_path, job_dir, settings, stages, job_id, store)
+    finally:
+        _purge_media(job_dir)
+
+
+def _execute_pipeline(
     input_path: Path,
     job_dir: Path,
     settings: Settings,
@@ -140,9 +166,11 @@ def execute_pipeline(
     # 1. Ingest stage
     set_stage("ingest", 0.10)
     ingest_cache_path = stages_dir / "ingest.done.json"
+    prepared = None
     if ingest_cache_path.exists():
-        prepared = Prepared.model_validate_json(ingest_cache_path.read_text(encoding="utf-8"))
-    else:
+        cached_prepared = Prepared.model_validate_json(ingest_cache_path.read_text(encoding="utf-8"))
+        prepared = cached_prepared if _media_present(cached_prepared) else None
+    if prepared is None:  # nothing cached, or the extracted media was removed after the last run
         t0 = time.monotonic()
         prepared = fns.ingest(input_path, job_dir / "work" / "ingest", settings)
         timings_s["ingest"] = round(time.monotonic() - t0, 2)
