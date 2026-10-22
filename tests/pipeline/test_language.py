@@ -37,8 +37,9 @@ def test_other_languages_mark_text_dimensions_not_assessed_but_still_score_the_r
     res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
     by_id = {x.id: x for x in res.dimensions}
     assert "language_unsupported" in res.flags
-    for dim in ("R4", "R5", "R10", "R11"):
+    for dim in ("R5", "R10", "R11"):
         assert by_id[dim].score is None
+    assert by_id["R4"].score is not None  # judged from the start time only
     for dim in ("R2", "R3", "R8", "R12"):  # language-independent measurements stay
         assert by_id[dim].score is not None
     assert res.coverage < 1.0

@@ -196,9 +196,11 @@ def test_non_english_marks_text_dimensions_not_assessed_not_zero(settings):
     args = _make_dummy_inputs(language_conf=0.3)
     res = scoring.score(*args, settings=settings)
     assert "language_uncertain" in res.flags
-    for dim_id in ["R4", "R5", "R6", "R10", "R11"]:
+    for dim_id in ["R5", "R6", "R10", "R11"]:
         d_score = next(d for d in res.dimensions if d.id == dim_id)
         assert d_score.score is None
+    r4 = next(d for d in res.dimensions if d.id == "R4")  # the start time does not depend on the language
+    assert r4.score is not None and "Only the start time" in (r4.note or "")
 
 
 def test_praise_density_has_zero_weight(settings):
@@ -302,3 +304,39 @@ def test_unanalysed_sections_lower_the_confidence_and_are_flagged(settings):
     checklist.chunks_total, checklist.chunks_failed = 4, 2
     res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
     assert "partial_analysis" in res.flags and res.confidence < base.confidence
+
+
+def _r4(settings, start_s, verdict="met", language_conf=0.95, language="en"):
+    from classeval.schema import SpeakerTurn
+
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs(all_verdicts=verdict, language_conf=language_conf)
+    tr = tr.model_copy(update={"language": language})
+    d = d.model_copy(update={"turns": [SpeakerTurn(start=start_s, end=start_s + 600, speaker="TUTOR")]})
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
+    return next(x for x in res.dimensions if x.id == "R4")
+
+
+def test_r4_blends_the_opening_words_with_how_soon_the_tutor_started(settings):
+    assert _r4(settings, start_s=10).score == 100.0
+    assert _r4(settings, start_s=600).score == pytest.approx(60.0)  # a met opening, but 10 minutes late
+    assert _r4(settings, start_s=105).score == pytest.approx(0.6 * 100 + 0.4 * 50)
+    assert _r4(settings, start_s=10, verdict="not_met").score == pytest.approx(0.6 * 10 + 0.4 * 100)
+
+
+def test_r4_start_time_is_reported_as_a_measurement(settings):
+    texts = [e.text for e in _r4(settings, start_s=105).evidence]
+    assert any("105 s into the recording" in t for t in texts)
+
+
+def test_r4_start_time_still_counts_when_the_language_is_not_supported(settings):
+    dim = _r4(settings, start_s=240, language="ml")
+    assert dim.score == 0.0
+
+
+def test_the_top_grade_needs_enough_of_the_rubric_assessed(settings):
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs(branded_ratio=None)
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, _force_top_grade(settings))
+    assert res.coverage == pytest.approx(0.92) and res.grade == "Excellent"  # one dimension missing is still fine
+    tr = tr.model_copy(update={"language": "ml"})
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, _force_top_grade(settings))
+    assert res.coverage < 0.8 and res.grade == "Good" and "grade_provisional" in res.flags

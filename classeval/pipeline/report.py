@@ -66,6 +66,10 @@ def summarize(result: ScoreResult, checklist: ChecklistResult) -> str:
         flags_str = ", ".join(result.flags)
         summary_parts.append(f"Technical flags noted: {flags_str}.")
 
+    if "grade_provisional" in result.flags:
+        summary_parts.append(
+            "Too little of the rubric could be assessed to award the top grade, so the grade is capped at Good."
+        )
     if checklist.degraded and "llm_degraded" in result.flags:
         summary_parts.append("Note: the language model could not analyse this class, so the grade rests on word-list signals only and is capped at Good.")
     elif checklist.chunks_failed:

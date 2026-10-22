@@ -51,6 +51,14 @@ class ScoreResult(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
+# Opening: full marks when the tutor speaks within 30 s of the recording start, none from 3 minutes on. Chosen after
+# seeing the ten labelled classes (first-speech time ranked them almost perfectly): treat it as exploratory.
+START_FULL_S = 30.0
+START_ZERO_S = 180.0
+PROVISIONAL_COVERAGE = 0.8  # below this share of the rubric assessed, the top grade is not awarded
+START_WEIGHT = 0.4  # share of R4 that comes from the start time when the opening was also judged from the words
+
+
 def _norm(x: float | None, lo: float, hi: float) -> float:
     """Normalize x to [0, 1] clamping to bounds. Inverts scale if lo > hi."""
     if x is None:
@@ -164,14 +172,22 @@ def score(
     r10_item = checklist.items.get("R10")
     r11_item = checklist.items.get("R11")
 
-    # R4: Welcoming & Warmup
-    dim_sources["R4"] = ["checklist:R4"]
-    if lang_uncertain:
-        dim_scores["R4"] = None
-        dim_notes["R4"] = "Text-derived dimension not assessed due to uncertain language"
+    # R4: Welcoming & Warmup = what the tutor said at the start (words) + how soon the tutor started (language free)
+    dim_sources["R4"] = ["checklist:R4", "diarization:first_tutor_speech_s"]
+    tutor_starts = [t.start for t in d.turns if d.tutor is not None and t.speaker == d.tutor]
+    start_s = min(tutor_starts) if tutor_starts else None
+    start_score = None if start_s is None else 100.0 * _norm(start_s, START_ZERO_S, START_FULL_S)
+    words_score = None if lang_uncertain else VERDICT_MAP.get(r4_item.verdict if r4_item else "not_observed")
+    if words_score is not None and start_score is not None:
+        dim_scores["R4"] = (1.0 - START_WEIGHT) * words_score + START_WEIGHT * start_score
     else:
-        dim_scores["R4"] = VERDICT_MAP.get(r4_item.verdict if r4_item else "not_observed")
-        dim_evidence["R4"] = r4_item.evidence if r4_item else []
+        dim_scores["R4"] = words_score if words_score is not None else start_score
+    if lang_uncertain:
+        dim_notes["R4"] = "Only the start time could be measured; the words of the opening are not assessed for this language"
+    r4_evidence = list(r4_item.evidence) if r4_item and not lang_uncertain else []
+    if start_s is not None:
+        r4_evidence += _measure(f"The tutor first spoke {start_s:.0f} s into the recording")
+    dim_evidence["R4"] = r4_evidence
 
     # R5: Objective Setting
     dim_sources["R5"] = ["checklist:R5"]
@@ -342,6 +358,9 @@ def score(
             grade = "Good"
     if checklist.chunks_failed:
         flags.append("partial_analysis")
+    if coverage < PROVISIONAL_COVERAGE and grade == "Excellent":
+        flags.append("grade_provisional")
+        grade = "Good"
 
     # Gate 2: Camera-off while tutor speaks >= 50%
     if tutor_speech_s > 0 and (video.camera_off_while_tutor_speaks_s / tutor_speech_s) >= 0.5:
