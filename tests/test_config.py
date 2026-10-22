@@ -44,6 +44,14 @@ def test_env_file_is_read_when_requested(tmp_path, monkeypatch):
     assert settings.access_code.get_secret_value() == "custom_file_code"
 
 
+def test_real_environment_beats_env_file(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("ACCESS_CODE=from_file\n", encoding="utf-8")
+    monkeypatch.setenv("ACCESS_CODE", "from_environment")
+    settings = load_settings("config.yaml", env_file=env_file)
+    assert settings.access_code.get_secret_value() == "from_environment"
+
+
 def test_placeholder_access_code_rejected(monkeypatch):
     monkeypatch.setenv("ACCESS_CODE", "change_this_to_a_secure_token")
     with pytest.raises(ValueError, match="ACCESS_CODE"):

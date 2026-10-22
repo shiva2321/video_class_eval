@@ -109,7 +109,7 @@ def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None 
     if env_file is not None:
         dotenv_path = Path(env_file)
         if dotenv_path.is_file():
-            load_dotenv(dotenv_path=dotenv_path, override=True)
+            load_dotenv(dotenv_path=dotenv_path, override=False)
 
     cfg_path = Path(path)
     if not cfg_path.exists():
