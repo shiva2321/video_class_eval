@@ -23,6 +23,7 @@ class ChecklistItem(BaseModel):
     dimension: DimId
     verdict: Literal["met", "partial", "not_met", "not_observed"]
     evidence: list[Evidence] = Field(default_factory=list)
+    reason: str = ""  # one visible sentence explaining the verdict
 
 
 class ChecklistResult(BaseModel):
@@ -44,8 +45,9 @@ Dimensions, as the tutors' quality reviewers define them:
 - R9 Content moves: revises the previous lesson, solves puzzles with the class, uses topic-related videos or the board well.
 - R10 Homework: the tutor explicitly assigns homework or practice to do after class.
 - R11 Conclusion: a proper closing with a recap of what was learned, a goodbye and a preview of the next class.
-Evidence: up to 2 items per dimension; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (at most 15 words).
-Also return up to 2 specific strengths and up to 2 specific improvements, each tied to a dimension and its evidence.
+For every dimension also give a reason: one plain sentence (at most 25 words) saying why you chose the verdict, based on what the chunk shows.
+Evidence: 1 to 2 items per dimension when the verdict is met, partial or not_met; t is the number in the line's [..s] tag, quote is copied verbatim from a TUTOR line (4 to 15 words).
+Also return up to 2 specific strengths and up to 2 specific improvements. Each MUST include 1 to 2 evidence items in the same form (a verbatim TUTOR quote with its t).
 """
 
 CHECKLIST_SCHEMA: dict[str, Any] = {
@@ -65,6 +67,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                         "type": "string",
                         "enum": ["met", "partial", "not_met", "not_observed"],
                     },
+                    "reason": {"type": "string"},
                     "evidence": {
                         "type": "array",
                         "maxItems": 2,
@@ -78,7 +81,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                         },
                     },
                 },
-                "required": ["dimension", "verdict", "evidence"],
+                "required": ["dimension", "verdict", "reason", "evidence"],
             },
         },
         "strengths": {
@@ -94,6 +97,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                     },
                     "evidence": {
                         "type": "array",
+                        "minItems": 1,
                         "maxItems": 2,
                         "items": {
                             "type": "object",
@@ -105,7 +109,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                         },
                     },
                 },
-                "required": ["text", "dimension"],
+                "required": ["text", "dimension", "evidence"],
             },
         },
         "improvements": {
@@ -121,6 +125,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                     },
                     "evidence": {
                         "type": "array",
+                        "minItems": 1,
                         "maxItems": 2,
                         "items": {
                             "type": "object",
@@ -132,7 +137,7 @@ CHECKLIST_SCHEMA: dict[str, Any] = {
                         },
                     },
                 },
-                "required": ["text", "dimension"],
+                "required": ["text", "dimension", "evidence"],
             },
         },
     },
@@ -316,6 +321,7 @@ def verify_evidence(item: ChecklistItem, tr: Transcript, tutor: str | None = Non
         dimension=item.dimension,
         verdict=verdict,
         evidence=verified_ev,
+        reason=item.reason if verdict == item.verdict else "",
     )
 
 
@@ -325,6 +331,44 @@ def _verify_observation(obs: Observation, tr: Transcript, tutor: str | None = No
     if not res.evidence:
         return None  # model text without verified evidence never reaches the report
     return Observation(text=mask_names(obs.text), dimension=obs.dimension, evidence=res.evidence)
+
+
+def _raw_evidence(ev_raw: dict[str, Any]) -> Evidence | None:
+    """Model-provided evidence as an Evidence (capped to 15 words); NOT yet verified or masked."""
+    quote = " ".join(str(ev_raw.get("quote", "")).split()[:15])
+    if not quote:
+        return None
+    try:
+        t = float(ev_raw.get("t", 0.0))
+    except (TypeError, ValueError):
+        return None
+    return Evidence(t_start=t, t_end=None, kind="quote", text=quote)
+
+
+def _observations(raw_list: list[dict[str, Any]], tr: Transcript, tutor: str | None) -> list[Observation]:
+    """Verified, masked strengths or improvements; anything without verified tutor evidence is dropped."""
+    out: list[Observation] = []
+    for raw in raw_list:
+        dim_val = raw.get("dimension")
+        if dim_val not in CHECKLIST_DIMS:
+            continue
+        evidence = [e for e in (_raw_evidence(x) for x in raw.get("evidence", [])) if e is not None]
+        obs = Observation(text=str(raw.get("text", "")), dimension=dim_val, evidence=evidence)
+        verified = _verify_observation(obs, tr, tutor)
+        if verified and verified.text:
+            out.append(verified)
+    return out
+
+
+def _pick_verdict(dim: DimId, candidates: list[ChecklistItem]) -> ChecklistItem:
+    """Winner rule: any met with verified evidence wins, else partial, else not_met, else not_observed."""
+    for verdict in ("met", "partial", "not_met"):
+        group = [c for c in candidates if c.verdict == verdict and (c.evidence or verdict != "met")]
+        if group:
+            evidence = [e for c in group for e in c.evidence][:3] if verdict != "not_met" else []
+            reason = next((c.reason for c in group if c.reason), "")
+            return ChecklistItem(dimension=dim, verdict=verdict, evidence=evidence, reason=reason)
+    return ChecklistItem(dimension=dim, verdict="not_observed", evidence=[])
 
 
 def reduce_chunks(
@@ -338,14 +382,9 @@ def reduce_chunks(
     reduced_items: dict[DimId, ChecklistItem] = {}
 
     for dim in CHECKLIST_DIMS:
-        # Determine allowed chunk indices based on reduction rules:
-        # R4: chunks starting in first 5 min (t0 <= 300 s)
-        # R10: last 2 chunks
-        # R11: last chunk only
+        # Which chunks may speak to a dimension: R4 only the opening (t0 <= 300 s), R10 the last 2, R11 the last.
         if dim == "R4":
-            allowed_indices = [i for i, (t0, _) in enumerate(chunk_times) if t0 <= 300.0]
-            if not allowed_indices:
-                allowed_indices = [0]
+            allowed_indices = [i for i, (t0, _) in enumerate(chunk_times) if t0 <= 300.0] or [0]
         elif dim == "R10":
             allowed_indices = list(range(max(0, n_chunks - 2), n_chunks))
         elif dim == "R11":
@@ -357,86 +396,21 @@ def reduce_chunks(
         for idx in allowed_indices:
             if idx >= len(chunk_evals):
                 continue
-            c_dict = chunk_evals[idx]
-            for it in c_dict.get("items", []):
-                if it.get("dimension") == dim:
-                    ev_list = [
-                        Evidence(
-                            t_start=float(ev_raw.get("t", 0.0)),
-                            t_end=None,
-                            kind="quote",
-                            text=_mask_and_cap_quote(str(ev_raw.get("quote", ""))),
-                        )
-                        for ev_raw in it.get("evidence", [])
-                        if str(ev_raw.get("quote", "")).strip()
-                    ]
-                    raw_item = ChecklistItem(
-                        dimension=dim,
-                        verdict=it.get("verdict", "not_observed"),
-                        evidence=ev_list,
-                    )
-                    verified = verify_evidence(raw_item, tr, tutor)
-                    candidates.append(verified)
+            for it in chunk_evals[idx].get("items", []):
+                if it.get("dimension") != dim:
+                    continue
+                evidence = [e for e in (_raw_evidence(x) for x in it.get("evidence", [])) if e is not None]
+                raw_item = ChecklistItem(
+                    dimension=dim,
+                    verdict=it.get("verdict", "not_observed"),
+                    evidence=evidence,
+                    reason=mask_names(str(it.get("reason", ""))[:240]),
+                )
+                candidates.append(verify_evidence(raw_item, tr, tutor))
+        reduced_items[dim] = _pick_verdict(dim, candidates)
 
-        # Winner rule: any met with verified evidence wins, else partial, else not_met, else not_observed
-        met_items = [c for c in candidates if c.verdict == "met" and c.evidence]
-        partial_items = [c for c in candidates if c.verdict == "partial"]
-        not_met_items = [c for c in candidates if c.verdict == "not_met"]
-
-        if met_items:
-            all_ev: list[Evidence] = []
-            for m in met_items:
-                all_ev.extend(m.evidence)
-            reduced_items[dim] = ChecklistItem(dimension=dim, verdict="met", evidence=all_ev[:3])
-        elif partial_items:
-            all_ev = []
-            for p in partial_items:
-                all_ev.extend(p.evidence)
-            reduced_items[dim] = ChecklistItem(dimension=dim, verdict="partial", evidence=all_ev[:3])
-        elif not_met_items:
-            reduced_items[dim] = ChecklistItem(dimension=dim, verdict="not_met", evidence=[])
-        else:
-            reduced_items[dim] = ChecklistItem(dimension=dim, verdict="not_observed", evidence=[])
-
-    all_strengths: list[Observation] = []
-    all_improvements: list[Observation] = []
-
-    for c_dict in chunk_evals:
-        for s_raw in c_dict.get("strengths", []):
-            dim_val = s_raw.get("dimension")
-            if dim_val in CHECKLIST_DIMS:
-                ev_list = [
-                    Evidence(
-                        t_start=float(ev_raw.get("t", 0.0)),
-                        t_end=None,
-                        kind="quote",
-                        text=_mask_and_cap_quote(str(ev_raw.get("quote", ""))),
-                    )
-                    for ev_raw in s_raw.get("evidence", [])
-                    if str(ev_raw.get("quote", "")).strip()
-                ]
-                obs = Observation(text=str(s_raw.get("text", "")), dimension=dim_val, evidence=ev_list)
-                v_obs = _verify_observation(obs, tr, tutor)
-                if v_obs and v_obs.text:
-                    all_strengths.append(v_obs)
-
-        for imp_raw in c_dict.get("improvements", []):
-            dim_val = imp_raw.get("dimension")
-            if dim_val in CHECKLIST_DIMS:
-                ev_list = [
-                    Evidence(
-                        t_start=float(ev_raw.get("t", 0.0)),
-                        t_end=None,
-                        kind="quote",
-                        text=_mask_and_cap_quote(str(ev_raw.get("quote", ""))),
-                    )
-                    for ev_raw in imp_raw.get("evidence", [])
-                    if str(ev_raw.get("quote", "")).strip()
-                ]
-                obs = Observation(text=str(imp_raw.get("text", "")), dimension=dim_val, evidence=ev_list)
-                v_obs = _verify_observation(obs, tr, tutor)
-                if v_obs and v_obs.text:
-                    all_improvements.append(v_obs)
+    all_strengths = [o for c in chunk_evals for o in _observations(c.get("strengths", []), tr, tutor)]
+    all_improvements = [o for c in chunk_evals for o in _observations(c.get("improvements", []), tr, tutor)]
 
     return ChecklistResult(
         items=reduced_items,

@@ -212,7 +212,7 @@ def render_html(report: Report) -> str:
     td {{ padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }}
     .dim-id {{ font-weight: 700; color: #2563eb; width: 48px; }}
     .dim-group {{ font-size: 12px; color: #94a3b8; font-weight: 400; }}
-    .dim-note {{ font-size: 12px; color: #e11d48; margin-top: 4px; }}
+    .dim-note {{ font-size: 12px; color: #475569; margin-top: 4px; }}
     .dim-weight {{ color: #64748b; width: 50px; text-align: center; }}
     .dim-score {{ font-weight: 700; width: 100px; text-align: right; }}
     .bar-track {{ height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; width: 100%; }}

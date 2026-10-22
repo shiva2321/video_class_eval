@@ -256,3 +256,16 @@ def test_measured_dimensions_carry_measure_evidence_and_rubric_names(settings):
         assert by_id[dim].evidence and by_id[dim].evidence[0].kind == "measure"
     assert by_id["R5"].name == "New-joiner introductions"
     assert by_id["R6"].name == "Individual interaction"
+
+
+def test_checklist_reason_becomes_the_dimension_note(settings):
+    media, tr, d, audio, video, tfacts, checklist = _make_dummy_inputs()
+    checklist.items["R4"] = ChecklistItem(
+        dimension="R4",
+        verdict="met",
+        evidence=[Evidence(t_start=10.0, kind="quote", text="Hello everyone welcome to class")],
+        reason="Greeted the children warmly before starting.",
+    )
+    res = scoring.score(media, tr, d, audio, video, tfacts, checklist, settings)
+    by_id = {x.id: x for x in res.dimensions}
+    assert by_id["R4"].note == "Greeted the children warmly before starting."

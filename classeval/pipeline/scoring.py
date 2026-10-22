@@ -259,6 +259,8 @@ def score(
         else f"{len(audio.dropouts)} audio dropouts"
     )
 
+    reasons = {k: v.reason for k, v in checklist.items.items() if v.reason}
+
     # Build DimensionScore list
     dimensions: list[DimensionScore] = []
     for d_id, meta in DIMENSION_META.items():
@@ -275,7 +277,7 @@ def score(
                 confidence=1.0 if score_val is not None else 0.0,
                 evidence=dim_evidence.get(d_id, []),
                 sources=dim_sources.get(d_id, []),
-                note=dim_notes.get(d_id),
+                note=dim_notes.get(d_id) or reasons.get(d_id),
             )
         )
 

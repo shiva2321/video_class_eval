@@ -399,3 +399,42 @@ def test_no_identified_tutor_fails_closed_without_calling_the_model(settings):
     res = extract(tr, d, facts, Boom(), settings)
     assert res.degraded
     assert all(item.verdict == "not_observed" and not item.evidence for item in res.items.values())
+
+
+def test_schema_requires_evidence_on_observations_and_a_reason_per_item():
+    from classeval.pipeline.checklist import CHECKLIST_SCHEMA
+
+    item = CHECKLIST_SCHEMA["properties"]["items"]["items"]
+    assert "reason" in item["required"]
+    for key in ("strengths", "improvements"):
+        obs = CHECKLIST_SCHEMA["properties"][key]["items"]
+        assert "evidence" in obs["required"]
+        assert obs["properties"]["evidence"]["minItems"] == 1
+
+
+def test_reason_is_masked_and_cleared_when_the_verdict_is_downgraded():
+    from classeval.pipeline.checklist import reduce_chunks
+    from classeval.schema import Segment, Transcript
+
+    tr = Transcript(
+        language="en",
+        language_confidence=0.9,
+        asr_model="t",
+        segments=[Segment(start=100, end=106, text="For homework please solve the chapter four tactics", speaker="S0")],
+    )
+    quote = {"t": 100, "quote": "For homework please solve the chapter four tactics"}
+    good = {"items": [{"dimension": "R10", "verdict": "met", "reason": "Tutor assigns homework to Gautham.", "evidence": [quote]}]}
+    invented = {
+        "items": [
+            {
+                "dimension": "R10",
+                "verdict": "met",
+                "reason": "Tutor assigns homework.",
+                "evidence": [{"t": 100, "quote": "a completely invented sentence about nothing at all"}],
+            }
+        ]
+    }
+    ok = reduce_chunks([good], [(0.0, 480.0)], tr, tutor="S0").items["R10"]
+    assert ok.verdict == "met" and "Gautham" not in ok.reason and "[Name]" in ok.reason
+    bad = reduce_chunks([invented], [(0.0, 480.0)], tr, tutor="S0").items["R10"]
+    assert bad.verdict == "not_observed" and bad.reason == ""
