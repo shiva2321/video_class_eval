@@ -64,24 +64,40 @@ class UploadStore:
             raise FileNotFoundError("Upload not found")
         return up_dir
 
-    def _open_uploads(self) -> list[tuple[int, int]]:
+    @staticmethod
+    def _stored_and_activity(up_dir: Path) -> tuple[int, float]:
+        """(bytes of chunks stored, time of the last write) for one upload folder."""
+        parts = list(up_dir.glob("chunk_*.part"))
+        newest = max([(up_dir / "meta.json").stat().st_mtime, *(p.stat().st_mtime for p in parts)])
+        return sum(p.stat().st_size for p in parts), newest
+
+    def _open_uploads(self, exclude: str | None = None) -> list[tuple[int, int]]:
         """(declared size, stored bytes) of unfinished uploads that were active within IDLE_CLAIM_S."""
         now = time.time()
         found: list[tuple[int, int]] = []
         for meta_path in self.root.glob("*/meta.json"):
             up_dir = meta_path.parent
-            if (up_dir / FINAL_NAME).exists():
+            if up_dir.name == exclude or (up_dir / FINAL_NAME).exists():
                 continue
             try:
-                parts = list(up_dir.glob("chunk_*.part"))
-                newest = max([meta_path.stat().st_mtime, *(p.stat().st_mtime for p in parts)])
+                stored, newest = self._stored_and_activity(up_dir)
                 if now - newest > IDLE_CLAIM_S:
-                    continue  # idle: holds nothing, so an abandoned upload cannot block the disk for long
-                declared = int(json.loads(meta_path.read_text(encoding="utf-8"))["size"])
-                found.append((declared, sum(p.stat().st_size for p in parts)))
+                    continue  # idle: holds nothing; it is re-checked against the others when it resumes
+                found.append((int(json.loads(meta_path.read_text(encoding="utf-8"))["size"]), stored))
             except (OSError, ValueError, KeyError):
                 continue  # an unreadable upload folder claims nothing; the purge job removes it later
         return found
+
+    def _admit_resume(self, upload_id: str, up_dir: Path, declared: int) -> None:
+        """An upload that went idle gave up its claim, so before it continues it must fit next to the active ones."""
+        stored, newest = self._stored_and_activity(up_dir)
+        if time.time() - newest <= IDLE_CLAIM_S:
+            return
+        others = self._open_uploads(exclude=upload_id)
+        claim = sum(max(0, 3 * d - st) for d, st in others)
+        need = max(0, 3 * declared - stored)
+        if len(others) >= MAX_OPEN_UPLOADS or shutil.disk_usage(self.root).free - claim < need:
+            raise InsufficientDiskSpace("The server is busy with other uploads. Please try again in a few minutes.")
 
     def _unfinished_claim(self) -> int:
         """Disk that active uploads still need (3x their size, minus what they have stored), so many concurrent
@@ -133,6 +149,7 @@ class UploadStore:
 
         chunk_path = up_dir / f"chunk_{index}.part"
         tmp_path = up_dir / f"chunk_{index}.tmp"
+        self._admit_resume(upload_id, up_dir, int(meta["size"]))
         if shutil.disk_usage(self.root).free < 2 * len(data):
             raise InsufficientDiskSpace("Not enough free disk space on the server.")
         tmp_path.write_bytes(data)
