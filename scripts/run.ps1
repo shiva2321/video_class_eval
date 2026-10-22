@@ -36,7 +36,7 @@ function Start-ServerProcess {
     return Start-Process -FilePath $PythonExe `
         -ArgumentList "-m", "uvicorn", "classeval.server.main:create_app", "--factory", "--host", $HostAddress, "--port", "$Port" `
         -RedirectStandardOutput $ServerLog `
-        -RedirectStandardError $ServerLog `
+        -RedirectStandardError ($ServerLog -replace '\.log$', '.err.log') `
         -PassThru `
         -NoNewWindow
 }
@@ -46,7 +46,7 @@ function Start-WorkerProcess {
     return Start-Process -FilePath $PythonExe `
         -ArgumentList "-m", "classeval.worker" `
         -RedirectStandardOutput $WorkerLog `
-        -RedirectStandardError $WorkerLog `
+        -RedirectStandardError ($WorkerLog -replace '\.log$', '.err.log') `
         -PassThru `
         -NoNewWindow
 }

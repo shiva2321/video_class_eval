@@ -35,13 +35,14 @@ FORBIDDEN_EXTS = {
     ".npz",
     ".npy",
 }
-ALLOWED_PATHS = ("assets/",)  # the 8x8 logo crop lives here; it contains no person
+ALLOWED_FILES = {"assets/8x8_logo_left8.png"}  # the one logo crop; it contains no person
 
 
 def is_forbidden_file(rel_path: str) -> bool:
-    """A media-like file that is not under an allow-listed folder."""
-    rel = rel_path.replace("\\", "/")
-    return Path(rel).suffix.lower() in FORBIDDEN_EXTS and not rel.startswith(ALLOWED_PATHS)
+    """A media-like file other than the exact allow-listed logo."""
+    rel = rel_path.replace("\\", "/").removeprefix("./")
+    return Path(rel).suffix.lower() in FORBIDDEN_EXTS and rel not in ALLOWED_FILES
+
 
 KEY_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z_-]{20,}"),

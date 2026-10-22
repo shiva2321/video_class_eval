@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from classeval.config import Settings
+from classeval.config import Settings, load_settings
 from classeval.maintenance import purge_expired
 from classeval.server.auth import FailureTracker, RateLimiter, get_auth_dependency
 from classeval.server.jobs import InvalidId, JobStore
@@ -38,11 +38,16 @@ class CreateJobRequest(BaseModel):
 
 
 def create_app(
-    settings: Settings,
+    settings: Settings | None = None,
     limiter: RateLimiter | None = None,
     failures: FailureTracker | None = None,
 ) -> FastAPI:
-    """FastAPI application factory for the Class Quality Assessor server."""
+    """FastAPI application factory for the Class Quality Assessor server.
+
+    `uvicorn classeval.server.main:create_app --factory` calls this without arguments, so the settings are then read
+    from config.yaml and .env in the folder the server was started from."""
+    if settings is None:
+        settings = load_settings("config.yaml", env_file=".env")
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:

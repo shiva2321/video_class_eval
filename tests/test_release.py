@@ -162,13 +162,23 @@ def test_flags_pictures_and_audio_derived_from_recordings(tmp_path: Path, capsys
     assert code == 1 and "forbidden_extension: 1" in out
 
 
-def test_the_logo_asset_folder_is_allowed(tmp_path: Path, capsys: pytest.CaptureFixture):
+def test_only_the_exact_logo_file_is_allowed(tmp_path: Path, capsys: pytest.CaptureFixture):
     git_cmd(tmp_path, "init")
-    logo = tmp_path / "assets" / "logo.png"
+    logo = tmp_path / "assets" / "8x8_logo_left8.png"
     logo.parent.mkdir()
     logo.write_bytes(b"\0 pretend logo")
-    git_cmd(tmp_path, "add", "assets/logo.png")
+    git_cmd(tmp_path, "add", "assets/8x8_logo_left8.png")
     git_cmd(tmp_path, "commit", "-m", "Add logo")
+    assert main(["--root", str(tmp_path)]) == 0 and "forbidden_extension: 0" in capsys.readouterr().out
 
+
+@pytest.mark.parametrize("name", ["assets/another.png", "assets/clip.mp4", "assets/voices.wav", "assets/sub.vtt", "assets/8x8_logo_left8.jpg"])
+def test_nothing_else_under_assets_is_allowed(tmp_path: Path, capsys: pytest.CaptureFixture, name: str):
+    git_cmd(tmp_path, "init")
+    target = tmp_path / name
+    target.parent.mkdir(exist_ok=True)
+    target.write_bytes(b"\0 pretend media")
+    git_cmd(tmp_path, "add", "-f", name)
+    git_cmd(tmp_path, "commit", "-m", "Add file")
     code = main(["--root", str(tmp_path)])
-    assert code == 0 and "forbidden_extension: 0" in capsys.readouterr().out
+    assert code == 1 and "forbidden_extension: 1" in capsys.readouterr().out
