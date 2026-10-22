@@ -109,33 +109,54 @@ def _clean(text: str, limit: int) -> str:
     return text
 
 
-def validate(parts: dict[str, str], facts: str) -> bool:
-    """Every number written must be a fact (to rounding for numbers of ten and over, exactly below), every capitalised name-like word must already be in the facts
-    (dimension names are; a person's name is not), and a field cannot be empty."""
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _sentence_is_grounded(sentence: str, facts: str, known: list[float]) -> bool:
+    """Numbers must be facts (to rounding for numbers of ten and over, exactly below) and a capitalised name-like word
+    must already appear in the facts (dimension names do; a person's name does not)."""
+    lowered = facts.lower()
+    if any(name.lower() not in lowered for name in find_names(sentence)):
+        return False
+    return all(any(abs(n - k) <= (0.51 if n >= 10 else 0.051) for k in known) for n in _numbers(sentence))
+
+
+def grounded(text: str, facts: str) -> str:
+    """Only the sentences of `text` whose numbers and names are facts."""
     known = _numbers(facts)
-    for text in parts.values():
-        if not text:
-            return False
-        if any(name not in facts for name in find_names(text)):
-            return False
-        if any(not any(abs(n - k) <= (0.51 if n >= 10 else 0.051) for k in known) for n in _numbers(text)):
-            return False
-    return True
+    return " ".join(x for x in _SENTENCE.split(text) if x and _sentence_is_grounded(x, facts, known))
+
+
+def _default_headline(rep: Report) -> str:
+    worst = [d.name for d, lost in points_lost(rep.dimensions)[:2] if lost >= 1.0]
+    held = f" {' and '.join(worst)} held the score back." if worst else ""
+    return f"{rep.grade}, score {rep.overall_score} of 100.{held}"
+
+
+def _default_improve(rep: Report) -> str:
+    worst = [d.name for d, lost in points_lost(rep.dimensions)[:2] if lost >= 1.0]
+    return f"The most points to gain are in {' and '.join(worst)}." if worst else "No dimension lost a notable number of points."
 
 
 def generate(rep: Report, client: OllamaClient) -> Narrative | None:
+    """The model's explanation keeping only grounded sentences. If the headline or the improvement advice has nothing
+    grounded left, a plain sentence built from the facts replaces it; without a grounded explanation there is none."""
     if rep.overall_score is None:
         return None
     facts = fact_sheet(rep)
     try:
-        answer = client.chat_json(SYSTEM_PROMPT, "<facts>\n" + facts + "\n</facts>", SCHEMA)
+        answer = client.chat_json(SYSTEM_PROMPT, f"<facts>\n{facts}\n</facts>", SCHEMA)
     except (LLMBadOutput, LLMUnavailable) as exc:
         logger.warning("no explanation written: %s", type(exc).__name__)
         return None
     if not isinstance(answer, dict):
         return None
-    parts = {k: _clean(answer.get(k, ""), FIELD_LIMITS[k]) for k in FIELD_LIMITS}
-    if not validate(parts, facts):
-        logger.warning("the written explanation failed its checks (empty field, unsafe text or a number that is not a fact) and was dropped")
+    parts = {k: grounded(_clean(answer.get(k, ""), FIELD_LIMITS[k]), facts) for k in FIELD_LIMITS}
+    if not parts["why"]:
+        logger.warning("no grounded sentence was left in the written explanation; it was dropped")
         return None
-    return Narrative(**parts)
+    return Narrative(
+        headline=parts["headline"] or _default_headline(rep),
+        why=parts["why"],
+        improve=parts["improve"] or _default_improve(rep),
+    )

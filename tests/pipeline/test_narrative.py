@@ -80,10 +80,24 @@ def test_the_model_only_sees_the_fact_sheet(settings):
     assert rep.summary not in client.seen[1] or rep.summary == "s"
 
 
-def test_an_invented_number_drops_the_explanation(settings):
+def test_a_sentence_with_an_invented_number_is_removed_and_the_rest_kept(settings):
     rep = _report(settings)
-    bad = {**GOOD, "why": "The tutor lost 93 points and students answered in 41 seconds."}
-    assert narrative.generate(rep, Client(bad)) is None
+    mixed = {**GOOD, "why": "Students answered quickly. The tutor lost 77 points because of silence. The screen was used well."}
+    out = narrative.generate(rep, Client(mixed))
+    assert out is not None and out.why == "Students answered quickly. The screen was used well."
+
+
+def test_an_explanation_with_nothing_grounded_is_dropped(settings):
+    rep = _report(settings)
+    assert narrative.generate(rep, Client({**GOOD, "why": "The tutor lost 93 points and students answered in 41 seconds."})) is None
+
+
+def test_an_ungrounded_headline_or_advice_is_replaced_by_a_plain_sentence_from_the_facts(settings):
+    rep = _report(settings)
+    out = narrative.generate(rep, Client({**GOOD, "headline": "A 97 out of 100 class.", "improve": "Wait 9 seconds after each question."}))
+    assert out is not None
+    assert out.headline.startswith(f"{rep.grade}, score {rep.overall_score} of 100.")
+    assert out.improve.startswith("The most points to gain are in ")
 
 
 def test_numbers_that_are_facts_pass_to_rounding(settings):
@@ -106,9 +120,9 @@ def test_a_field_with_a_link_or_markup_invalidates_the_explanation(settings, bad
     assert narrative.generate(rep, Client({**GOOD, "why": bad})) is None
 
 
-def test_empty_fields_invalidate_the_explanation(settings):
-    rep = _report(settings)
-    assert narrative.generate(rep, Client({**GOOD, "improve": "   "})) is None
+def test_an_empty_improvement_gets_the_plain_sentence(settings):
+    out = narrative.generate(_report(settings), Client({**GOOD, "improve": "   "}))
+    assert out is not None and out.improve.startswith(("The most points to gain", "No dimension lost"))
 
 
 @pytest.mark.parametrize("failure", [LLMBadOutput, LLMUnavailable])
@@ -122,10 +136,11 @@ def test_no_score_means_no_explanation(settings):
     assert narrative.generate(rep, Client(GOOD)) is None
 
 
-def test_a_person_name_that_is_not_in_the_facts_drops_the_explanation(settings):
+def test_a_sentence_naming_a_person_is_removed(settings):
     rep = _report(settings)
-    named = {**GOOD, "improve": "Ask Gautham, and then Priya, to share one move each."}
-    assert narrative.generate(rep, Client(named)) is None
+    named = {**GOOD, "why": "Students answered quickly. Ask Gautham, and then Priya, to share one move each."}
+    out = narrative.generate(rep, Client(named))
+    assert out is not None and out.why == "Students answered quickly."
 
 
 def test_dimension_names_are_not_mistaken_for_people(settings):
@@ -136,8 +151,8 @@ def test_dimension_names_are_not_mistaken_for_people(settings):
 
 def test_small_numbers_must_match_exactly(settings):
     rep = _report(settings)
-    ok = {**GOOD, "improve": "Wait 9 seconds after each question."}
-    assert narrative.generate(rep, Client(ok)) is None  # nothing in the facts says 9
+    out = narrative.generate(rep, Client({**GOOD, "why": "Students answered quickly. Wait 9 seconds after each question."}))
+    assert out is not None and "9" not in out.why  # nothing in the facts says 9
 
 
 def test_the_report_page_shows_the_explanation_and_the_points_lost_escaped(settings):
