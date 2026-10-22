@@ -71,6 +71,17 @@ async def test_healthz_reports_whether_the_proxy_header_arrived(monkeypatch):
     assert proxied.json()["forwarded"] is True
 
 
+def test_memory_pressure_never_wipes_an_active_lockout():
+    tracker = FailureTracker(max_failures=3, window_s=300.0, max_keys=20)
+    for _ in range(3):
+        tracker.record("locked-client")
+    assert tracker.is_locked("locked-client")
+    for i in range(200):  # a flood of other failing clients
+        tracker.record(f"noise-{i}")
+    assert tracker.is_locked("locked-client")
+    assert len(tracker._failures) <= 20
+
+
 def test_failure_table_is_capped():
     tracker = FailureTracker(max_failures=3, window_s=300.0, max_keys=50)
     for i in range(500):

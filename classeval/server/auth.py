@@ -55,11 +55,14 @@ class FailureTracker:
         self._failures: dict[str, list[float]] = defaultdict(list)
 
     def _gc(self) -> None:
-        """Bound memory: drop clients with no recent failure; if still too many, start over."""
+        """Bound memory without wiping active lockouts: drop expired clients, then evict the client with the
+        oldest last failure, preferring clients that are not locked out (locked ones are evicted last)."""
         cutoff = self._clock() - self.window_s
         self._failures = defaultdict(list, {k: v for k, v in self._failures.items() if v and v[-1] >= cutoff})
-        if len(self._failures) >= self.max_keys:
-            self._failures.clear()
+        while len(self._failures) >= self.max_keys:
+            unlocked = [k for k, v in self._failures.items() if len(v) < self.max_failures]
+            victim = min(unlocked or list(self._failures), key=lambda k: self._failures[k][-1])
+            del self._failures[victim]
 
     def _recent(self, key: str) -> list[float]:
         cutoff = self._clock() - self.window_s
@@ -92,7 +95,10 @@ def client_ip(request: Request) -> str:
 
 def is_shared_client(request: Request) -> bool:
     """True when visitors cannot be told apart: the peer is loopback and no proxy-added address is present.
-    Locking such a key out would lock out everybody, so the lockout does not apply to it."""
+    Locking such a key out would lock out everybody, so the lockout does not apply to it. Accepted trade-off:
+    guessing is then bounded only by the request rate limit and the code's length (random, at least ten
+    characters), which is far safer than letting one visitor lock out every evaluator. When the tunnel forwards
+    the client address (checked via /healthz) remote visitors never use this key."""
     host = request.client.host if request.client else "127.0.0.1"
     return host in ("127.0.0.1", "::1") and not request.headers.get("x-forwarded-for")
 
