@@ -33,6 +33,12 @@ class OllamaClient:
         self.num_ctx = num_ctx
         self.transport = transport
 
+    @classmethod
+    def from_settings(cls, settings) -> "OllamaClient":
+        """A client configured from settings.ollama and settings.models.llm."""
+        cfg = settings.ollama
+        return cls(base_url=cfg.base_url, model=settings.models.llm, timeout_s=cfg.timeout_s, seed=cfg.seed, num_ctx=cfg.num_ctx)
+
     def chat_json(
         self,
         system: str,

@@ -71,7 +71,7 @@ def main() -> int:
         settings = load_settings("config.yaml", env_file=".env")
     except (ValueError, FileNotFoundError) as exc:
         return fail(f"settings: {exc} -> run scripts/install.py first")
-    client = OllamaClient(base_url=settings.ollama.base_url, model=settings.models.llm)
+    client = OllamaClient.from_settings(settings)
     try:
         client.chat_json("Answer with JSON.", 'Reply {"ok": true}.', {"type": "object", "properties": {"ok": {"type": "boolean"}}})
     except Exception as exc:  # noqa: BLE001 - report the class, then stop

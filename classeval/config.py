@@ -22,6 +22,7 @@ class OllamaConfig(BaseModel):
     seed: int = 7  # the sampling seed of every model call; a different seed gives a different but equally valid answer
     parallel: int = 4  # transcript chunks sent to the model at once; the server runs as many as it has slots for and queues the rest
     num_ctx: int = 8192  # context window of every call (a chunk and its answer need about 5000 tokens)
+    timeout_s: float = 900.0  # one answer; generous because a CPU-only model needs minutes for a chunk and queued calls wait
 
 
 class ChecklistConfig(BaseModel):
@@ -37,7 +38,7 @@ class GroupsConfig(BaseModel):
 
 class CutoffsConfig(BaseModel):
     poor_lt: float = 65.0
-    average_lt: float = 75.0
+    average_lt: float = 74.0
     good_lt: float = 80.0
 
 

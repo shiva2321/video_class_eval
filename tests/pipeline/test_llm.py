@@ -118,3 +118,14 @@ def test_the_context_window_and_the_seed_come_from_the_client_settings():
     client = OllamaClient("http://mock", "m", transport=httpx.MockTransport(handler), seed=42, num_ctx=4096)
     client.chat_json("s", "u", schema={"type": "object"})
     assert seen["seed"] == 42 and seen["num_ctx"] == 4096
+
+
+def test_a_client_built_from_settings_uses_every_ollama_setting(monkeypatch):
+    from classeval.config import load_settings
+
+    monkeypatch.setenv("ACCESS_CODE", "test_from_settings_1")
+    settings = load_settings("config.yaml", env_file=None)
+    settings.ollama.seed, settings.ollama.num_ctx, settings.ollama.timeout_s = 5, 2048, 77.0
+    client = OllamaClient.from_settings(settings)
+    assert (client.seed, client.num_ctx, client.timeout_s) == (5, 2048, 77.0)
+    assert client.model == settings.models.llm and client.base_url == settings.ollama.base_url.rstrip("/")

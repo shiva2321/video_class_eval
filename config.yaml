@@ -33,7 +33,7 @@ groups:
 # enough to fit it). Ten labelled classes cannot support a precise fit, see README "Evaluation".
 cutoffs:
   poor_lt: 65
-  average_lt: 75
+  average_lt: 74
   good_lt: 80
 
 limits:
