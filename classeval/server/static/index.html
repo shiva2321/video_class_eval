@@ -93,7 +93,10 @@
       <section id="reportSection" class="card report-card hidden">
         <div class="report-header">
           <h2>Assessment Complete</h2>
-          <button id="newAssessmentBtn" class="btn btn-secondary">Assess Another Class</button>
+          <div class="report-actions">
+            <a id="openReportLink" class="btn btn-secondary" target="_blank" rel="noopener">Open full page</a>
+            <button id="newAssessmentBtn" class="btn btn-secondary">Assess Another Class</button>
+          </div>
         </div>
         <div class="report-frame-wrapper">
           <iframe id="reportFrame" class="report-frame" title="Assessment Report"></iframe>

@@ -320,9 +320,19 @@ body {
   border: 1px solid var(--card-border);
 }
 
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.report-actions .btn {
+  text-decoration: none;
+}
+
 .report-frame {
   width: 100%;
-  min-height: 480px;
+  min-height: 70vh;
   border: none;
   background-color: #ffffff;
 }
