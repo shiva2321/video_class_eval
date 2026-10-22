@@ -4,6 +4,13 @@ import secrets
 from pathlib import Path
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+# The client's file name is display metadata only and is never used as an on-disk name.
+FINAL_NAME = "upload.bin"
+_TMP_NAME = "upload.tmp"
+
+
+class UploadClosed(Exception):
+    """Raised when a chunk is sent for an upload that has already been completed."""
 
 
 class UploadTooLarge(Exception):
@@ -72,6 +79,8 @@ class UploadStore:
 
     def put_chunk(self, upload_id: str, index: int, data: bytes) -> None:
         up_dir = self._dir(upload_id)
+        if (up_dir / FINAL_NAME).exists():
+            raise UploadClosed("Upload already completed")
         meta = self._meta(upload_id)
         if not 0 <= index < meta["total_chunks"]:
             raise BadChunk("Chunk index out of range")
@@ -89,16 +98,17 @@ class UploadStore:
         return [i for i in range(meta["total_chunks"]) if not (up_dir / f"chunk_{i}.part").exists()]
 
     def complete(self, upload_id: str) -> Path:
+        up_dir = self._dir(upload_id)
+        target_path = up_dir / FINAL_NAME
+        if target_path.exists():  # idempotent: completing twice returns the same file
+            return target_path.resolve()
+
         missing_indices = self.missing(upload_id)
         if missing_indices:
             raise MissingChunks(missing_indices)
 
-        meta = self._meta(upload_id)
-        total_chunks = meta["total_chunks"]
-        up_dir = self._dir(upload_id)
-
-        target_path = up_dir / meta["filename"]
-        tmp_target = up_dir / (meta["filename"] + ".tmp")
+        total_chunks = self._meta(upload_id)["total_chunks"]
+        tmp_target = up_dir / _TMP_NAME
 
         with open(tmp_target, "wb") as outfile:
             for i in range(total_chunks):
@@ -116,8 +126,7 @@ class UploadStore:
     def final_path(self, upload_id: str) -> Path | None:
         """Completed file of an upload, or None if the id is invalid or the upload is not complete."""
         try:
-            meta = self._meta(upload_id)
+            path = self._dir(upload_id) / FINAL_NAME
         except FileNotFoundError:
             return None
-        path = self._dir(upload_id) / meta["filename"]
         return path.resolve() if path.is_file() else None

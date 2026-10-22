@@ -74,6 +74,37 @@ async def test_complete_does_not_leak_server_paths(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hostile_name", ["meta.json", "chunk_0.part", "upload.tmp", "..", "..\\..\\x.mp4", "a.mp4:stream"])
+async def test_client_filename_is_never_used_on_disk(monkeypatch, tmp_path, hostile_name):
+    client, _ = _client(monkeypatch, tmp_path)
+    async with client:
+        init = await client.post("/api/uploads", json={"size": 3, "filename": hostile_name}, headers=HEADERS)
+        upload_id = init.json()["upload_id"]
+        await client.put(f"/api/uploads/{upload_id}/chunks/0", content=b"abc", headers=HEADERS)
+        done = await client.post(f"/api/uploads/{upload_id}/complete", headers=HEADERS)
+    assert done.status_code == 200
+    up_dir = tmp_path / "uploads" / upload_id
+    assert (up_dir / "upload.bin").read_bytes() == b"abc"
+    assert "total_chunks" in (up_dir / "meta.json").read_text(encoding="utf-8")  # metadata not overwritten
+    assert sorted(p.name for p in up_dir.iterdir()) == ["meta.json", "upload.bin"]
+
+
+@pytest.mark.asyncio
+async def test_completed_upload_is_closed_and_complete_is_idempotent(monkeypatch, tmp_path):
+    client, _ = _client(monkeypatch, tmp_path)
+    async with client:
+        init = await client.post("/api/uploads", json={"size": 3, "filename": "a.mp4"}, headers=HEADERS)
+        upload_id = init.json()["upload_id"]
+        await client.put(f"/api/uploads/{upload_id}/chunks/0", content=b"abc", headers=HEADERS)
+        first = await client.post(f"/api/uploads/{upload_id}/complete", headers=HEADERS)
+        again = await client.post(f"/api/uploads/{upload_id}/complete", headers=HEADERS)
+        late = await client.put(f"/api/uploads/{upload_id}/chunks/0", content=b"zzz", headers=HEADERS)
+    assert first.status_code == 200 and again.status_code == 200
+    assert late.status_code == 409
+    assert (tmp_path / "uploads" / upload_id / "upload.bin").read_bytes() == b"abc"
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_uses_last_forwarded_entry_behind_local_proxy(monkeypatch, tmp_path):
     client, _ = _client(monkeypatch, tmp_path, limiter=RateLimiter(max_requests=2, window_s=60.0))
     async with client:

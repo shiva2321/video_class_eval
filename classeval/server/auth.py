@@ -35,6 +35,31 @@ class RateLimiter:
         timestamps.append(now)
 
 
+class FailureTracker:
+    """Per-client lockout after repeated wrong or missing access codes (brute-force guard).
+
+    A locked client is refused even with the correct code, so the lockout cannot be used as a guessing oracle.
+    """
+
+    def __init__(self, max_failures: int = 10, window_s: float = 300.0, clock: Callable[[], float] = time.monotonic):
+        self.max_failures = max_failures
+        self.window_s = window_s
+        self._clock = clock
+        self._failures: dict[str, list[float]] = defaultdict(list)
+
+    def _recent(self, key: str) -> list[float]:
+        cutoff = self._clock() - self.window_s
+        recent = [t for t in self._failures[key] if t >= cutoff]
+        self._failures[key] = recent
+        return recent
+
+    def is_locked(self, key: str) -> bool:
+        return len(self._recent(key)) >= self.max_failures
+
+    def record(self, key: str) -> None:
+        self._recent(key).append(self._clock())
+
+
 rate_limiter = RateLimiter()
 
 
@@ -49,26 +74,32 @@ def client_ip(request: Request) -> str:
     return host
 
 
-def get_auth_dependency(settings: Settings, limiter: RateLimiter | None = None) -> Callable:
+def get_auth_dependency(
+    settings: Settings,
+    limiter: RateLimiter | None = None,
+    failures: FailureTracker | None = None,
+) -> Callable:
     expected_code = settings.access_code.get_secret_value()
     active_limiter = limiter if limiter is not None else rate_limiter
+    active_failures = failures if failures is not None else FailureTracker()
 
     async def verify_auth(
         request: Request,
         header_code: str | None = Security(api_key_header),
     ) -> bool:
-        # Check rate limit first
-        active_limiter.check(client_ip(request))
+        ip = client_ip(request)
+        active_limiter.check(ip)
 
-        # Extract code from header or cookie
-        provided_code = header_code or request.cookies.get("access")
-        if not provided_code:
+        if active_failures.is_locked(ip):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed attempts. Try again in a few minutes.",
+                headers={"Retry-After": str(int(active_failures.window_s))},
             )
 
-        if not hmac.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):
+        provided_code = header_code or request.cookies.get("access")
+        if not provided_code or not hmac.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):
+            active_failures.record(ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized",

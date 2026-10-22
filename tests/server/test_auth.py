@@ -2,7 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from classeval.config import load_settings
-from classeval.server.auth import RateLimiter
+from classeval.server.auth import FailureTracker, RateLimiter
 from classeval.server.main import create_app
 
 
@@ -23,7 +23,11 @@ async def test_healthz_open(app):
 
 
 @pytest.mark.asyncio
-async def test_missing_or_wrong_code_401_on_all_api_routes(app):
+async def test_missing_or_wrong_code_401_on_all_api_routes(monkeypatch):
+    monkeypatch.setenv("ACCESS_CODE", "correct_token_123")
+    settings = load_settings("config.yaml", env_file=None)
+    # This test deliberately sends many bad requests; switch the brute-force lockout off for it.
+    app = create_app(settings, failures=FailureTracker(max_failures=10_000))
     transport = ASGITransport(app=app)
     routes = [
         ("POST", "/api/uploads", {"size": 100, "filename": "test.mp4"}),

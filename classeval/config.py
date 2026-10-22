@@ -126,6 +126,9 @@ def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None 
     if access_code == "change_this_to_a_secure_token":
         raise ValueError("ACCESS_CODE cannot be placeholder value ('change_this_to_a_secure_token')")
 
+    if len(access_code) < 10:
+        raise ValueError("ACCESS_CODE must be at least 10 characters")
+
     data["access_code"] = access_code
 
     raw_hf_token = os.environ.get("HF_TOKEN")

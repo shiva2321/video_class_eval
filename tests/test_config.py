@@ -52,6 +52,12 @@ def test_real_environment_beats_env_file(tmp_path, monkeypatch):
     assert settings.access_code.get_secret_value() == "from_environment"
 
 
+def test_short_access_code_rejected(monkeypatch):
+    monkeypatch.setenv("ACCESS_CODE", "short9chr")
+    with pytest.raises(ValueError, match="at least 10"):
+        load_settings("config.yaml", env_file=None)
+
+
 def test_placeholder_access_code_rejected(monkeypatch):
     monkeypatch.setenv("ACCESS_CODE", "change_this_to_a_secure_token")
     with pytest.raises(ValueError, match="ACCESS_CODE"):

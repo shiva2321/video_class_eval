@@ -10,11 +10,12 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from classeval.config import Settings
-from classeval.server.auth import RateLimiter, get_auth_dependency
+from classeval.server.auth import FailureTracker, RateLimiter, get_auth_dependency
 from classeval.server.jobs import InvalidId, JobStore
 from classeval.server.uploads import (
     BadChunk,
     MissingChunks,
+    UploadClosed,
     UploadStore,
     UploadTooLarge,
 )
@@ -30,13 +31,17 @@ class CreateJobRequest(BaseModel):
     upload_id: str = Field(pattern=r"^[A-Za-z0-9_-]{16,64}$")
 
 
-def create_app(settings: Settings, limiter: RateLimiter | None = None) -> FastAPI:
+def create_app(
+    settings: Settings,
+    limiter: RateLimiter | None = None,
+    failures: FailureTracker | None = None,
+) -> FastAPI:
     """FastAPI application factory for the Class Quality Assessor server."""
     app = FastAPI(title="8x8 Class Quality Assessor")
 
     # Per-app limiter. The default is generous enough for 8 MiB chunked uploads of a multi-GB file.
     active_limiter = limiter if limiter is not None else RateLimiter(max_requests=600, window_s=60.0)
-    auth_dep = get_auth_dependency(settings, limiter=active_limiter)
+    auth_dep = get_auth_dependency(settings, limiter=active_limiter, failures=failures)
 
     @app.exception_handler(InvalidId)
     async def _invalid_id(_request: Request, _exc: InvalidId) -> JSONResponse:
@@ -97,6 +102,8 @@ def create_app(settings: Settings, limiter: RateLimiter | None = None) -> FastAP
             return {"status": "ok"}
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Upload not found") from exc
+        except UploadClosed as exc:
+            raise HTTPException(status_code=409, detail="Upload already completed") from exc
         except BadChunk as exc:
             raise HTTPException(status_code=413 if exc.too_large else 400, detail=str(exc)) from exc
 
