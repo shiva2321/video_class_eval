@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 class ModelsConfig(BaseModel):
     whisper: str = "large-v3-turbo"
-    whisper_dir: Path = Path(r"F:\models\whisper")
+    whisper_dir: Path = Path("models/whisper")
     clip: str = "openai/clip-vit-base-patch32"
     ecapa: str = "speechbrain/spkrec-ecapa-voxceleb"
     whisper_multilingual: str = "faster-whisper-large-v3"
@@ -125,6 +125,14 @@ class Settings(BaseModel):
     recordings_dir: Path | None = None
 
 
+def _merge(base: dict, override: dict) -> dict:
+    """Recursive dictionary merge: values of `override` win, nested dictionaries are merged key by key."""
+    out = dict(base)
+    for key, value in override.items():
+        out[key] = _merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
 def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None = ".env") -> Settings:
     if env_file is not None:
         dotenv_path = Path(env_file)
@@ -137,6 +145,11 @@ def load_settings(path: Path | str = "config.yaml", env_file: Path | str | None 
 
     with open(cfg_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+    # Machine-specific overrides (model folder, ports) live in an untracked config.local.yaml next to config.yaml.
+    local_path = cfg_path.with_name("config.local.yaml")
+    if local_path.is_file():
+        with open(local_path, "r", encoding="utf-8") as f:
+            data = _merge(data, yaml.safe_load(f) or {})
 
     raw_access_code = os.environ.get("ACCESS_CODE")
     if not raw_access_code or not raw_access_code.strip():

@@ -121,3 +121,4 @@ Thumbs.db
 .vscode/
 .claude/
 .gemini/
+config.local.yaml

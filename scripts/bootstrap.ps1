@@ -119,7 +119,7 @@ with open('config.yaml', 'r', encoding='utf-8') as f:
     cfg = yaml.safe_load(f)
 
 models_cfg = cfg.get('models', {})
-whisper_dir = Path(models_cfg.get('whisper_dir', r'F:\models\whisper'))
+whisper_dir = Path(models_cfg.get('whisper_dir', 'models/whisper'))
 whisper_dir.mkdir(parents=True, exist_ok=True)
 
 def dir_size_mb(path: Path) -> float:

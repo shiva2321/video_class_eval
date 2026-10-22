@@ -127,3 +127,15 @@ def test_env_override(monkeypatch):
     rep = repr(settings)
     assert "secret_token_val" not in rep
     assert "hf_secret_123" not in rep
+
+
+def test_a_local_override_file_is_merged_over_the_shared_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("ACCESS_CODE", "test_local_override_1")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(Path("config.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    base = load_settings(cfg, env_file=None)
+    assert Path(base.models.whisper_dir) == Path("models/whisper")  # portable default: no drive letters in the repository
+    (tmp_path / "config.local.yaml").write_text("models:\n  whisper_dir: 'D:/weights/whisper'\nlimits:\n  job_ttl_hours: 2\n", encoding="utf-8")
+    merged = load_settings(cfg, env_file=None)
+    assert Path(merged.models.whisper_dir) == Path("D:/weights/whisper") and merged.limits.job_ttl_hours == 2
+    assert merged.models.llm == base.models.llm and merged.limits.max_upload_bytes == base.limits.max_upload_bytes  # the rest is kept

@@ -1,6 +1,6 @@
 models:
   whisper: "large-v3-turbo"
-  whisper_dir: 'F:\models\whisper'
+  whisper_dir: 'models/whisper'  # relative to the folder the app runs from; override in config.local.yaml
   clip: "openai/clip-vit-base-patch32"
   ecapa: "speechbrain/spkrec-ecapa-voxceleb"
   whisper_multilingual: "faster-whisper-large-v3"
