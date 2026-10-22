@@ -4,7 +4,7 @@ models:
   clip: "openai/clip-vit-base-patch32"
   ecapa: "speechbrain/spkrec-ecapa-voxceleb"
   pyannote: "pyannote/speaker-diarization-3.1"
-  llm: "qwen3-vl:8b"
+  llm: "qwen3-vl:8b-instruct"
 
 ollama:
   base_url: "http://127.0.0.1:11434"
