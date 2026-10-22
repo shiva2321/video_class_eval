@@ -38,6 +38,7 @@ class LimitsConfig(BaseModel):
     min_duration_s: float = 600.0
     chunk_bytes: int = 8388608
     job_ttl_hours: float = 24.0
+    job_lease_s: float = 1800.0  # a running job untouched for this long is presumed orphaned by a dead worker
 
 
 class SamplingConfig(BaseModel):

@@ -39,6 +39,7 @@ limits:
   min_duration_s: 600
   chunk_bytes: 8388608
   job_ttl_hours: 24
+  job_lease_s: 1800
 
 sampling:
   frame_fps: 0.2
