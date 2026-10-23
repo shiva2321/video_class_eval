@@ -156,3 +156,19 @@ def test_requeue_stale(tmp_path: Path):
 
     reloaded_failed = store.get(job_failed.id)
     assert reloaded_failed.status == "failed"
+
+
+def test_requeue_with_zero_lease_takes_back_a_job_cut_off_a_moment_ago(tmp_path: Path):
+    # The worker calls requeue_stale(store, 0) when it starts: the only worker has just started, so a "running" job is orphaned
+    # even if it was updated a few seconds ago (a restart or a crash), and must not wait for its lease to run out.
+    store = JobStore(tmp_path / "jobs")
+    job = store.create(source={"type": "upload"})
+    store.update(job.id, status="running", stage="asr", progress=0.3)
+    waiting = store.create(source={"type": "upload"})
+
+    requeued = requeue_stale(store, 0)
+
+    assert requeued == [job.id]
+    assert store.get(job.id).status == "queued"
+    assert store.get(job.id).progress == 0.0
+    assert store.get(waiting.id).status == "queued"

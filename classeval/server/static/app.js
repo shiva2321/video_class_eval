@@ -140,6 +140,7 @@
     selectedFile = null;
     fileInput.value = "";
     resetStages();
+    forgetJob();
   });
 
   function resetStages() {
@@ -269,6 +270,7 @@
 
       const jobData = await jobResp.json();
       const jobId = jobData.job_id;
+      rememberJob(jobId);
 
       // Subscribe to Events
       subscribeToJob(jobId);
@@ -350,6 +352,7 @@
         } else if (data.status === "failed") {
           es.close();
           const errDetail = data.error ? (data.error.message || JSON.stringify(data.error)) : "Pipeline failed.";
+          forgetJob();
           showError("Assessment Failed", errDetail);
         }
       } catch (e) {
@@ -379,6 +382,7 @@
         } else if (job.status === "failed") {
           clearInterval(pollInterval);
           if (currentEventSource) currentEventSource.close();
+          forgetJob();
           showError("Assessment Failed", job.error ? job.error.message : "Pipeline failed.");
         }
       } catch (e) {
@@ -426,4 +430,31 @@
     }
     return null;
   }
+
+  // The running job is remembered in this browser, so reloading the page (or coming back to it later) shows its progress
+  // or its report again instead of an empty upload form. A finished report stays on the server for 24 hours.
+  function rememberJob(jobId) {
+    try { localStorage.setItem("classeval_job_id", jobId); } catch (e) { /* private mode: nothing to remember */ }
+  }
+
+  function forgetJob() {
+    try { localStorage.removeItem("classeval_job_id"); } catch (e) { /* nothing stored */ }
+  }
+
+  (async function resumeJob() {
+    let jobId = null;
+    try { jobId = localStorage.getItem("classeval_job_id"); } catch (e) { return; }
+    if (!jobId || !accessCodeInput.value.trim()) return;
+    try {
+      const resp = await fetch("/api/jobs/" + encodeURIComponent(jobId), { headers: getAuthHeader() });
+      if (resp.status === 404) { forgetJob(); return; }  // expired or removed
+      if (!resp.ok) return;                              // wrong code or server busy: leave the upload form
+    } catch (e) {
+      return;
+    }
+    uploadSection.classList.add("hidden");
+    progressSection.classList.remove("hidden");
+    resetStages();
+    subscribeToJob(jobId);
+  })();
 })();

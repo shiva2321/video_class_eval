@@ -18,7 +18,58 @@ uv run python scripts/run.py                                                 # o
 
 The challenge asked for a page that can be reached online. The author also runs one from their own computer during the
 evaluation; its address is in the submission form, it needs the access code and it is only up while that computer is on.
-Everything below works the same on your own computer, which is the supported way to use it.
+[Using the live page](#using-the-live-page) says what to do and what to expect, including after a refresh and when the page is
+down. Everything else here works the same on your own computer, which is the supported way to use it.
+
+## Three ways to try it
+
+| | What you do | Use it when |
+|---|---|---|
+| **The live page** | open the address from the submission form, enter the access code, upload a recording | you want to try it at once and nothing needs installing; it is only up while the author's computer is on |
+| **Your own computer** | [Set up](#set-up-about-30-minutes-mostly-downloads) once, then `uv run python scripts/run.py` | the live page is down, or the recording must not leave your machine (the children in it are identifiable) |
+| **One recording, no page** | `uv run python scripts/run_pipeline.py --input recording.mp4 --out results` | you only want the report file |
+
+## Using the live page
+
+The address and the access code are in the submission form. The page is served from the author's own computer, so there is no
+account to make and nothing to install.
+
+1. Open the address and enter the access code (or open the link that ends in `#code=` and the code, which fills it in).
+2. **Choose File**: an MP4, MKV or AVI recording of 10 minutes to 3 hours, at most 2.5 GB. Then **Start Assessment**.
+3. The recording is sent in pieces of 8 MB (**Uploading chunk 3 of 28**). Keep the tab open and the device awake until the list of
+   stages appears. Upload speed is the usual reason this takes long: from a phone on mobile data one piece took about 20 seconds,
+   so a video of about 220 MB took roughly ten minutes. For long recordings use a computer on a good connection.
+4. The page then follows the job through ten stages: Queued, Ingest & Probe, Transcription, Diarization, Audio Analysis,
+   Video & Board OCR, Understanding, Scoring Prior, Generating Report, Complete. **One recording is processed at a time**, so
+   "Queued" at 0 % means another recording is ahead of yours; it is not an error. A class of about an hour takes about three
+   minutes on the author's PC once it starts (see [Speed](#speed)); add the time of any recordings ahead of yours.
+5. When it is done the report appears on the page. **Open full page** shows it in its own tab, **Assess Another Class** returns
+   to the upload form. The upload and its working files are deleted when the job ends and the finished report after 24 hours.
+
+### If you refresh, go back or close the page
+
+| Where you are | What happens |
+|---|---|
+| Still uploading (**Uploading chunk n of N**) | The upload is lost and nothing of it is kept. Choose the file again and keep the tab open until the stages appear. |
+| The list of stages is showing (queued or processing) | Safe. The job runs on the author's computer whatever the browser does. The page remembers the job in this browser, so a refresh, or coming back later, shows the progress or, when it is done, the report. The access code is remembered too. |
+| Another browser or device, a private window, or site data cleared | That browser does not know your job, so the page shows the empty upload form. Upload again, or go back to the browser you started in. |
+| More than 24 hours later | The report has been deleted; the page shows the upload form. |
+| The author's computer restarted while the job ran | The page may show **Connection lost**. Reload it after a minute or two: the job is queued again when the computer is back, starts from the beginning, and the page picks it up. |
+
+### If the page does not open or something looks wrong
+
+1. Wait a few minutes and reload. The computer may be restarting (for example after a Windows update). It is set up to start the
+   page again by itself as soon as it has started, with nobody logged in; see
+   [Keeping the page up all the time](#keeping-the-page-up-all-the-time-the-authors-windows-setup).
+2. Open the address followed by `/healthz`. `{"status":"ok", ...}` means the page itself is up, so look at the access code, the file
+   or your connection. No answer, or an error page from Tailscale, means the author's computer is off or offline.
+3. Read the message on the page. **Access denied**: wrong access code. **Too many failed attempts**: wait five minutes.
+   **Rate limit reached**: wait a minute. **Exceeds the upload limit**: the file is over 2.5 GB. **Server error**: try again
+   later. A report that says **Insufficient evidence** is not a failure: the recording is shorter than 10 minutes, nearly silent,
+   or too little of it could be assessed.
+4. Still nothing: run it on your own computer ([Set up](#set-up-about-30-minutes-mostly-downloads), about 30 minutes, mostly
+   downloads). It is the same program with the same settings, and the recording never leaves your machine. You can also reach the
+   author through the submission form.
 
 ## What you need
 
@@ -99,7 +150,46 @@ tailscale funnel --bg 8765          # prints the public https address; "tailscal
 Anyone who opens that address needs the access code from `.env`. A link ending in `#code=` followed by the code fills it in
 automatically (the part after `#` is never sent to a server and is removed from the address bar), so one link is enough to hand over.
 Anyone who has such a link can upload recordings to your computer: share it only with people you trust and switch the funnel off
-afterwards. The computer must stay awake and `scripts/run.py` running while others use it.
+afterwards. The computer must stay awake and `scripts/run.py` running while others use it; the next section automates that on Windows.
+
+## Keeping the page up all the time (the author's Windows setup)
+
+This is how the author keeps the live page up without anyone sitting at the computer. It is optional: on your own computer
+`uv run python scripts/run.py` is enough. It is Windows only; on Linux or macOS run `scripts/run.py` from a service manager
+(systemd, launchd) and `tailscale funnel --bg 8765` once.
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\service\install_autostart.ps1 -Funnel
+```
+
+Run it once. It asks for administrator rights (a Windows prompt) and writes `logs/install.log`. Leave out `-Funnel` to keep the page
+on this computer only. It sets up:
+
+- **A scheduled task `ClassEvalServer`** that starts at boot, with nobody logged in, again at logon, and every 5 minutes if it ever
+  stopped. It runs as your user at normal priority (Task Scheduler's default of "below normal" starved the speech-model load,
+  about 10 MB/s instead of over 1 GB/s, and left jobs looking stuck). It does not stop on battery and has no time limit.
+- **`scripts/service/supervisor.ps1`**, which the task runs. It starts Ollama if it is not running, starts the page and the worker
+  (`scripts/run.py`), starts them again if they stop or if nothing listens on port 8765 for a minute, asks Windows not to sleep
+  while it runs, and with `-Funnel` keeps the Tailscale Funnel pointing at the page. When the worker starts, a job that was still
+  marked running (cut off by a restart or a crash) is queued again and runs from the beginning.
+- **No sleep and no hibernate on mains power**. The screen may still turn off.
+- **Tailscale in unattended mode**, so the shared address comes up at boot. Without it Tailscale waits for someone to sign in and
+  the Funnel stays down after every restart.
+
+Look at it, any time:
+
+```
+scripts\service\watch_logs.cmd                                                      # a live window: requests, uploads, worker, Ollama, job progress
+powershell -ExecutionPolicy Bypass -File scripts\service\status.ps1                 # one screen: task, ports, /healthz, Tailscale, sleep settings
+```
+
+The live window only reads the logs, so closing it never affects the server. It prints a status line every 30 seconds (page and
+Ollama up or down, GPU use, jobs running and waiting) and counts the many small model calls instead of listing each one (`-All`
+lists them). `scripts\service\uninstall_autostart.ps1` removes the task; power and Tailscale settings are left as they are.
+
+Two things no script can do. After a **power cut** the computer only starts again by itself if the firmware setting
+"Restore on AC Power Loss" (also called "After Power Failure") is set to "Power On"; otherwise press the power button, and the
+page then starts by itself. **Windows Update** can still restart the computer overnight; the page comes back by itself afterwards.
 
 ## What the report contains
 
@@ -158,7 +248,8 @@ time they speak caps the grade at Average.
   the web page the upload and all working files are deleted when a job ends, and the finished report after 24 hours.
 - The report quotes **only the tutor**, at most 15 words, each quote verified against the transcript, names masked. What children
   said is measured (timing, length), never quoted. A test checks that a phrase spoken by a child never reaches logs or stored files.
-- Logs contain stage names, durations and error class names, never speech.
+- Logs contain stage names, durations and error class names, never speech. The page keeps two things in your browser: the access
+  code and the id of your last job (so a refresh finds it again); no recording data.
 - The web page asks for the access code on every request and locks a client out after repeated wrong codes; it limits request
   rates, upload size and open uploads, refuses uploads when the disk would run full, validates every identifier against path
   tricks, sends security headers, and removes old jobs. Anyone who can reach the page and has the code can upload recordings, so
@@ -251,7 +342,12 @@ recordings produce many), recording length and bitrate, and any model verdict wi
   Ollama serves one request at a time.
 - **"Too many failed attempts"**: wait five minutes, then use the code from `.env`.
 - **Port 8765 is taken**: `uv run python scripts/run.py --port 8800`.
-- **Where to look**: `logs/server.log`, `logs/worker.log` and their `.err.log` files; they never contain speech.
+- **A job stays "Queued"**: another job is ahead of it (one at a time). If nothing is running and it does not move, look at
+  `logs/worker.err.log`; it should end with `Claimed job ...`. A worker that restarted queues an interrupted job again by itself.
+- **The shared address does not load after a restart (Windows)**: run `scripts\service\status.ps1`. `tailscale` must say `Running`; if it
+  says `NoState`, run `tailscale set --unattended` (the installer does this) and check you are signed in to Tailscale.
+- **Where to look**: `logs/server.log`, `logs/worker.log` and their `.err.log` files; they never contain speech. With the
+  Windows setup above also `logs/supervisor.log` and `logs/ollama.err.log`, all together in `scripts\service\watch_logs.cmd`.
 
 ## What has been tested
 
@@ -259,6 +355,11 @@ recordings produce many), recording length and bitrate, and any model verdict wi
   the lock file, speech, voice and image models downloaded, language model present) and printed `SELFTEST OK`. The unit tests
   (`pytest -m "not gpu and not ollama and not e2e"`), the GPU and end-to-end tests, the ten labelled recordings, the two demos and
   three internet videos all ran.
+- **Windows, always-on setup** (`scripts/service`). Installed and started from the scheduled task, which runs without a logged-in
+  session: the page, worker and Ollama came up by themselves, Ollama used the GPU, four recordings went through the shared
+  address one after another, and the public address answered `/healthz`. Stopping the launcher brought the page back within 10
+  seconds. **A cold restart of the computer was not run when this was written**; the boot trigger and Tailscale unattended mode are
+  set, but that path is untested.
 - **Windows, GPU hidden** (`CUDA_VISIBLE_DEVICES=-1`). The self-test also printed `SELFTEST OK`, so speech recognition, voice clustering and
   the image model work on the CPU. The language model still ran on the GPU through Ollama, so a fully CPU-only run was not timed.
 - **Linux and macOS: not run.** The code and the lock file are written for them (a torch build per platform, the CPU fallback, test
@@ -304,6 +405,8 @@ review log.
 | `scripts/eval_loo.py`, `summarize_run.py`, `summarize_timings.py`, `make_degraded.py` | evaluation, diagnostics, timings, changed copies |
 | `scripts/asr_bench.py`, `scripts/diar_check.py` | speech recognition and speaker separation checked against a platform transcript (`--vtt`) |
 | `scripts/smoke_public.py` | send a generated clip to a running page (local or shared) and wait for the report |
+| `scripts/service/install_autostart.ps1`, `supervisor.ps1`, `uninstall_autostart.ps1` | Windows: keep the page, worker, Ollama and the shared address up from boot (see above) |
+| `scripts/service/watch_logs.cmd`, `status.ps1` | Windows: a live log window; a one-screen health check |
 | `scripts/release_scan.py` | checks the tree and git history for secrets, media, pictures, audio, e-mail addresses and listed names |
 | `scripts/export_ai_history.py` | turns AI session records into a redacted log (see below) |
 

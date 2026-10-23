@@ -124,3 +124,6 @@ Thumbs.db
 .claude/
 .gemini/
 config.local.yaml
+
+# --- runtime logs and the supervisor's lock file (client addresses, job ids) ---
+logs/

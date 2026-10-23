@@ -95,7 +95,10 @@ def main() -> None:
 
     store = JobStore(settings.paths.jobs_dir)
     try:
-        requeue_stale(store, settings.limits.job_lease_s)
+        # There is one worker, and it has only just started: a job still marked "running" was cut off by a restart or a
+        # crash. Queue it again now instead of leaving it "running" until its lease runs out (30 minutes, and never
+        # re-checked while the worker lives).
+        requeue_stale(store, 0)
         purge_expired(
             settings.paths.jobs_dir,
             settings.paths.uploads_dir,
