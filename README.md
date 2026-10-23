@@ -62,6 +62,21 @@ on the same page. One job runs at a time, others wait. The page is only reachabl
 Recordings of 10 minutes to 3 hours work (a shorter one gives "Insufficient evidence"). Settings are in `config.yaml`; settings
 that belong to one computer (for example another model folder) go in an untracked `config.local.yaml` merged over it.
 
+### Share it from your own computer (optional)
+
+The page can be reached from other devices without any server or cloud account, using [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+(free; the analysis still happens on your computer and the recording only travels, encrypted, between the browser and your computer):
+
+```
+uv run python scripts/run.py        # keep this running
+tailscale funnel --bg 8765          # prints the public https address; "tailscale funnel --https=443 off" switches it off
+```
+
+Anyone who opens that address needs the access code from `.env`. A link ending in `#code=` followed by the code fills it in
+automatically (the part after `#` is never sent to a server and is removed from the address bar), so one link is enough to hand over.
+Anyone who has such a link can upload recordings to your computer: share it only with people you trust and switch the funnel off
+afterwards. The computer must stay awake and `scripts/run.py` running while others use it.
+
 ## What the report contains
 
 A grade and a confidence; a **"why this grade"** section (a short explanation written from the measured facts, and a table of the

@@ -30,7 +30,7 @@ def test_readme_covers_setup_use_privacy_limitations_signals_and_what_was_tested
 def test_the_readme_has_no_unfilled_placeholders_and_no_stale_script_names():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "PLACEHOLDER" not in readme
-    for stale in ("bootstrap.ps1", "run.ps1", "funnel.ps1", "Funnel"):
+    for stale in ("bootstrap.ps1", "run.ps1", "funnel.ps1"):
         assert stale not in readme, stale
 
 
