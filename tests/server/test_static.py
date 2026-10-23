@@ -40,3 +40,22 @@ def test_a_code_in_the_link_fragment_is_taken_over_and_removed_from_the_address_
     js = Path("classeval/server/static/app.js").read_text(encoding="utf-8")
     assert 'new URLSearchParams(location.hash.slice(1)).get("code")' in js
     assert "history.replaceState" in js and 'localStorage.setItem("classeval_access_code"' in js
+
+
+def test_the_cookie_value_is_encoded_and_a_fragment_code_is_validated():
+    js = Path("classeval/server/static/app.js").read_text(encoding="utf-8")
+    assert "encodeURIComponent(value" in js and "decodeURIComponent(raw)" in js
+    assert r"/^[!-~]{1,128}$/.test(linkCode)" in js
+
+
+@pytest.mark.asyncio
+async def test_a_percent_encoded_cookie_with_special_characters_is_accepted(monkeypatch):
+    from urllib.parse import quote
+
+    code = "odd;code=with space%and!chars_123"
+    monkeypatch.setenv("ACCESS_CODE", code)
+    app = create_app(load_settings("config.yaml", env_file=None))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        ok = await client.get("/api/jobs/abcdefghijklmnop0123", cookies={"access": quote(code, safe="")})
+        wrong = await client.get("/api/jobs/abcdefghijklmnop0123", cookies={"access": "nope"})
+    assert ok.status_code == 404 and wrong.status_code == 401  # authorised (the job does not exist) versus refused

@@ -2,6 +2,7 @@ import hmac
 import time
 from collections import defaultdict
 from collections.abc import Callable
+from urllib.parse import unquote
 
 from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
@@ -127,7 +128,7 @@ def get_auth_dependency(
                 headers={"Retry-After": str(int(active_failures.window_s))},
             )
 
-        provided_code = header_code or request.cookies.get("access")
+        provided_code = header_code or unquote(request.cookies.get("access") or "")  # the page percent-encodes it
         if not provided_code:  # not a guess: never counts towards a lockout
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
         if not hmac.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):

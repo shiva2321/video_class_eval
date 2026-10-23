@@ -42,9 +42,9 @@
 
   // A shared link may carry the access code after the # (the address followed by #code=and the code). The part after # never goes to the
   // server; it is moved into the field and removed from the address bar so it is not copied by accident.
-  const linkCode = new URLSearchParams(location.hash.slice(1)).get("code");
-  if (linkCode) {
-    localStorage.setItem("classeval_access_code", linkCode.trim());
+  const linkCode = (new URLSearchParams(location.hash.slice(1)).get("code") || "").trim();
+  if (/^[!-~]{1,128}$/.test(linkCode)) {  // printable characters only, bounded length; anything else is ignored
+    localStorage.setItem("classeval_access_code", linkCode);
     history.replaceState(null, "", location.pathname + location.search);
   }
 
@@ -406,7 +406,7 @@
       date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
       expires = "; expires=" + date.toUTCString();
     }
-    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Strict" + (location.protocol === "https:" ? "; Secure" : "");
+    document.cookie = name + "=" + encodeURIComponent(value || "") + expires + "; path=/; SameSite=Strict" + (location.protocol === "https:" ? "; Secure" : "");
   }
 
   function getCookie(name) {
@@ -415,7 +415,14 @@
     for (let i = 0; i < ca.length; i++) {
       let c = ca[i];
       while (c.charAt(0) === " ") c = c.substring(1, c.length);
-      if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+      if (c.indexOf(nameEQ) === 0) {
+        const raw = c.substring(nameEQ.length, c.length);
+        try {
+          return decodeURIComponent(raw);
+        } catch (e) {
+          return raw;
+        }
+      }
     }
     return null;
   }
