@@ -1,7 +1,13 @@
-**What it does.** The app grades an online class recording Poor, Average, Good or Excellent and explains the grade with evidence. It runs entirely on the evaluator's own computer, because children's recordings may not go to unapproved services. One command installs it and a self-test proves the installation.
+Okay, so here's my thinking.
 
-**Approach: measure the facts, constrain the judgement.** Speech recognition, voice clustering, screen analysis, a local vision model (is the tutor's face visible while they speak?) and audio analysis supply the facts. A local language model reads the transcript in chunks and fills a fixed checklist, with a reason and a verbatim tutor quote per verdict, each quote verified against the transcript. A transparent weighted rubric, built from the tutors' review notes, turns facts and verdicts into a score; unmeasurable items are "not assessed", never guessed. The report explains the grade in words written only from its own facts (sentences with unsupported numbers or names are removed), beside a table of points lost per dimension.
+First, these recordings have kids' faces and voices in them, so nothing goes to any cloud AI. Everything runs on my own PC.
 
-**How I used AI.** Claude planned and reviewed; Gemini in Antigravity implemented under written data-handling rules. I reviewed every diff and rejected failures such as a path-traversal bug and a fallback that graded a weak class Excellent.
+Second, I didn't want an AI just watching a class and saying "Good". That's a guess I can't explain. The computer measures real things: who talks and for how long, how fast kids answer, whether the tutor's face is on screen, whether the 8x8 background is there, the audio. A local AI model reads the transcript only to answer a fixed checklist (greeting, homework, closing) and has to show a real quote as proof. A simple weighted score, built from the QA team's own notes, turns that into a grade, and the "why" is written only from those facts.
 
-**What I trust, and what I don't.** On eight labelled classes the exact grade matched 0.75, within one grade 0.875. These are optimistic: boundaries and several choices were made on the same classes, and with boundaries fitted leave-one-out the exact match is 0.375 (guessing: 0.25). The model's seed alone moved a score by up to 3.0 points. Audio and warmth measures missed problems the reviewers flagged. Transcript checks are English-only; other languages get measured signals and a capped grade. Tested on Windows with and without a GPU; Linux and macOS are untested.
+I used Claude to plan and review, and Gemini to write code. My reviews caught a bug that could delete folders, a hidden shortcut in a test, a fallback that gave a weak class "Excellent", and frames with kids' faces left on disk. All fixed, and frames are now deleted after every run.
+
+What worked: the logo check in the tutor's small corner video, checking whether the tutor is actually visible, and speed, about 3 minutes per hour of class.
+
+What didn't, honestly: I only have 8 labelled classes. On those, the exact grade matched 0.75 of the time, within one grade 0.875. But I tuned the boundaries on those same classes, so that's optimistic. Fitted fairly it drops to 0.375, and guessing gets 0.25. The audio and warmth scores missed problems the reviewers flagged. Text checks only work in English; tested on Windows only.
+
+So treat the grade as a rough signal, and the evidence as the real answer.
