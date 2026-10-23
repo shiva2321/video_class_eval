@@ -1,6 +1,9 @@
-"""Turn Claude Code session transcripts (JSONL) into one readable, redacted log of the prompts and replies.
+"""Turn AI session records into one readable, redacted log of the prompts and replies.
 
-    uv run python scripts/export_ai_history.py <out.md> <session.jsonl> [<session.jsonl> ...] [--pdf out.pdf]
+    uv run python scripts/export_ai_history.py <out.md> <record> [<record> ...] [--pdf out.pdf]
+
+A record is a Claude Code transcript (.jsonl) or an Antigravity / Gemini conversation database (.db, SQLite with
+protocol-buffer steps). Both are read-only.
 
 Kept: every message of the person (pasted reports included), every reply of the assistant, and a one-line note for each tool
 call. Dropped: hidden reasoning, system reminders, and the output of tools (it only ever held numbers and file listings, but
@@ -12,15 +15,19 @@ only shown numbers (see GEMINI.md).
 import argparse
 import json
 import re
+import sqlite3
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 _REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_TOKENS = re.compile(r"\b(?:hf_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,})\b")
+_TOKENS = re.compile(
+    r"\b(?:hf_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,}|ya29\.[0-9A-Za-z_-]{20,})\b"
+    r"|\b1//[0-9A-Za-z_-]{30,}"
+)
 _PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL)
 _HOST = re.compile(r"\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net\b|\bdesktop-[a-z0-9]{5,}\b", re.IGNORECASE)
 _HOME = re.compile(r"(?i)(?:[A-Z]:[\\/]+|/[a-z]/)Users[\\/]+[^\\/\s\"']+")
@@ -41,9 +48,11 @@ def env_values(env_path: Path) -> list[str]:
     return values
 
 
-def redact(text: str, secrets: list[str] | None = None) -> str:
+def redact(text: str, secrets: list[str] | None = None, names: list[str] | None = None) -> str:
     for value in secrets or []:
         text = text.replace(value, "[secret]")
+    for name in names or []:  # the account name as a whole word, so "fastapi" survives a user called "asta"
+        text = re.sub(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", "[user]", text, flags=re.IGNORECASE)
     text = _PRIVATE_KEY.sub("[private key]", text)
     text = _TOKENS.sub("[token]", text)
     text = _EMAIL.sub("[email]", text)
@@ -93,6 +102,112 @@ def entries(path: Path):
             yield obj.get("timestamp", ""), "ASSISTANT" if kind == "assistant" else "PERSON", "\n".join(parts)
 
 
+def _varint(data: bytes, i: int) -> tuple[int, int]:
+    shift = value = 0
+    while True:
+        byte = data[i]
+        i += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, i
+        shift += 7
+
+
+def _fields(data: bytes) -> list[tuple[int, int, int | bytes]]:
+    """(field number, wire type, value) of one protocol-buffer message; ValueError when the bytes are not one."""
+    i, out = 0, []
+    while i < len(data):
+        key, i = _varint(data, i)
+        number, wire = key >> 3, key & 7
+        if wire == 0:
+            value, i = _varint(data, i)
+            out.append((number, wire, value))
+        elif wire == 2:
+            size, i = _varint(data, i)
+            if i + size > len(data):
+                raise ValueError("truncated")
+            out.append((number, wire, data[i : i + size]))
+            i += size
+        elif wire in (1, 5):
+            i += 8 if wire == 1 else 4
+        else:
+            raise ValueError("unsupported wire type")
+    return out
+
+
+def _text_fields(data: bytes, path: tuple[int, ...] = ()):
+    """Every readable text field of a message, nested messages included, with its path of field numbers."""
+    try:
+        fields = _fields(data)
+    except (ValueError, IndexError):
+        return
+    for number, wire, value in fields:
+        if wire != 2 or not isinstance(value, bytes) or not value:
+            continue
+        try:
+            _fields(value)
+            nested = True
+        except (ValueError, IndexError):
+            nested = False
+        if nested:
+            yield from _text_fields(value, (*path, number))
+            continue
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if sum(ch.isprintable() or ch in "\n\r\t" for ch in text) / len(text) > 0.95:
+            yield (*path, number), text
+
+
+def _step_time(metadata: bytes | None) -> str:
+    """ISO time from the first (seconds) field of a step's metadata, or an empty string."""
+    try:
+        for number, wire, value in _fields(metadata or b""):
+            if number == 1 and wire == 2 and isinstance(value, bytes):
+                for n2, w2, v2 in _fields(value):
+                    if n2 == 1 and w2 == 0 and isinstance(v2, int):
+                        return datetime.fromtimestamp(v2, tz=UTC).isoformat()
+    except (ValueError, IndexError, OverflowError, OSError):
+        pass
+    return ""
+
+
+# Antigravity step types seen in its conversation databases: 14 = the person's message, 15 = a model turn.
+_AG_USER, _AG_MODEL = 14, 15
+
+
+def antigravity_entries(path: Path):
+    """(time, role, text) for the person's messages and the model's visible replies of one Antigravity conversation.
+
+    Model turns also carry a hidden reasoning summary and the arguments of tool calls; the reasoning is dropped and each
+    tool call becomes a one-line note, as in the Claude transcripts."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "select step_type, metadata, step_payload from steps where step_type in (?, ?) order by idx", (_AG_USER, _AG_MODEL)
+        ).fetchall()
+    finally:
+        con.close()
+    for step_type, metadata, payload in rows:
+        texts = {field: text for field, text in _text_fields(payload)}
+        when = _step_time(metadata)
+        if step_type == _AG_USER:
+            text = (texts.get((19, 2)) or texts.get((19, 3, 1)) or "").strip()
+            if text:
+                yield when, "PERSON", text
+            continue
+        parts = []
+        reply = (texts.get((20, 1)) or "").strip()
+        if reply:
+            parts.append(reply)
+        call = texts.get((20, 7, 3))
+        if call:
+            parts.append(f"[tool call] {' '.join(call.split())[:_TOOL_LIMIT]}")
+        if parts:
+            yield when, "ASSISTANT", "\n".join(parts)
+
+
 def stamp(value: str) -> str:
     try:
         return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
@@ -100,22 +215,28 @@ def stamp(value: str) -> str:
         return ""
 
 
-def build(paths: list[Path], secrets: list[str]) -> str:
+def build(paths: list[Path], secrets: list[str], names: list[str] | None = None) -> str:
     out = [
         "# AI interaction history (redacted)",
         "",
         (
-            "Planning, review and coding sessions for the Class Quality Assessor. PERSON is the human; ASSISTANT is Claude (planner and "
-            "reviewer). Tool calls appear as one-line notes; tool output and hidden reasoning are omitted. The second assistant, "
-            "Gemini in Antigravity, worked from the prompts in docs/ai-history/prompts of the repository. Redacted: e-mail addresses, "
-            "tokens, home-folder name, machine name. No recording, frame or transcript was ever shown to any assistant."
+            "Planning, review and coding sessions for the Class Quality Assessor. PERSON is the human; in the Claude Code sessions "
+            "ASSISTANT is Claude (planner and reviewer), in the Antigravity conversation it is Gemini (implementer, working from the "
+            "prompts that are also in docs/ai-history/prompts). Tool calls appear as one-line notes; tool output and hidden reasoning "
+            "are omitted. Redacted: e-mail addresses, tokens, home-folder name, machine name. No recording, frame or transcript was "
+            "ever shown to any assistant."
         ),
         "",
     ]
     for path in paths:
-        out += [f"## Session file {path.stem[:8]}", ""]
-        for when, role, text in entries(path):
-            text = redact(text, secrets)
+        if path.suffix == ".db":
+            out += [f"## Antigravity (Gemini) conversation {path.stem[:8]}", ""]
+            source = antigravity_entries(path)
+        else:
+            out += [f"## Claude Code session {path.stem[:8]}", ""]
+            source = entries(path)
+        for when, role, text in source:
+            text = redact(text, secrets, names)
             if role == "ASSISTANT" and len(text) > _ASSISTANT_LIMIT:
                 text = text[:_ASSISTANT_LIMIT].rstrip() + f"\n[... {len(text) - _ASSISTANT_LIMIT} more characters not included]"
             out += [f"**{role}** {stamp(when)}", "", text, ""]
@@ -148,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     secrets = env_values(ROOT / ".env")
-    text = build(args.sessions, secrets)
+    text = build(args.sessions, secrets, [Path.home().name])
     leaked = [v for v in secrets if v in text]
     if leaked:
         print("refusing to write: a secret survived redaction", file=sys.stderr)

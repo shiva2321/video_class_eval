@@ -68,7 +68,7 @@ def test_nothing_is_written_when_a_secret_survives(tmp_path, monkeypatch):
     session = tmp_path / "s.jsonl"
     _write(session, [{"type": "user", "message": {"content": "my value is abc"}}])
     monkeypatch.setattr(export, "env_values", lambda _path: ["abc"])
-    monkeypatch.setattr(export, "redact", lambda text, secrets=None: text)  # a broken redaction must be caught by the final check
+    monkeypatch.setattr(export, "redact", lambda text, secrets=None, names=None: text)  # a broken redaction must be caught by the final check
     out = tmp_path / "out.md"
     assert export.main([str(out), str(session)]) == 1 and not out.exists()
 
@@ -84,3 +84,75 @@ def test_a_message_typed_while_the_assistant_was_working_is_kept(tmp_path):
     )
     log = export.build([session], [])
     assert "the run is taking long" in log and "automated notice" not in log
+
+
+def _varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = n & 0x7F
+        n >>= 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _field(number: int, payload: bytes) -> bytes:
+    return _varint(number << 3 | 2) + _varint(len(payload)) + payload
+
+
+def _antigravity_db(path, steps):
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    con.execute("create table steps (idx integer primary key, step_type integer, metadata blob, step_payload blob)")
+    for idx, (step_type, seconds, payload) in enumerate(steps):
+        metadata = _field(1, _varint(1 << 3) + _varint(seconds))
+        con.execute("insert into steps values (?, ?, ?, ?)", (idx, step_type, metadata, payload))
+    con.commit()
+    con.close()
+
+
+def test_an_antigravity_conversation_is_read_for_messages_replies_and_tool_calls_only(tmp_path):
+    user = _field(19, _field(2, b"Workspace is the repo. Build task one.") + _field(3, _field(1, b"Workspace is the repo. Build task one.")))
+    model = _field(20, _field(1, b"Done, all tests pass.") + _field(3, b"hidden reasoning summary") + _field(7, _field(3, b'{"Path":"x.py"}')))
+    other = _field(30, _field(5, b"internal checkpoint text"))
+    db = tmp_path / "e7b3e06f-test.db"
+    _antigravity_db(db, [(14, 1_792_000_000, user), (15, 1_792_000_060, model), (23, 1_792_000_070, other), (132, 1_792_000_080, other)])
+
+    rows = list(export.antigravity_entries(db))
+    assert [role for _, role, _ in rows] == ["PERSON", "ASSISTANT"]
+    assert rows[0][2] == "Workspace is the repo. Build task one."
+    assert "Done, all tests pass." in rows[1][2] and '[tool call] {"Path":"x.py"}' in rows[1][2]
+    assert "hidden reasoning" not in rows[1][2] and "internal checkpoint" not in str(rows)
+    assert rows[0][0].startswith("2026-")  # the step time was decoded from the metadata
+
+
+def test_the_log_labels_an_antigravity_database_and_redacts_it_like_the_others(tmp_path):
+    folder = "C:" + chr(92) + "Users" + chr(92) + "Asta" + chr(92) + "work"
+    user = _field(19, _field(2, f"mail me at someone@example.com from {folder}".encode()))
+    db = tmp_path / "abcd1234-conv.db"
+    _antigravity_db(db, [(14, 1_792_000_000, user)])
+    log = export.build([db], [])
+    assert "## Antigravity (Gemini) conversation abcd1234" in log
+    assert "someone@example.com" not in log and "Asta" not in log and "[email]" in log
+
+
+def test_google_access_and_refresh_tokens_are_redacted():
+    text = "ya29." + "A" * 40 + " and 1//" + "b" * 45
+    out = export.redact(text)
+    assert "A" * 40 not in out and "b" * 45 not in out and out.count("[token]") == 2
+
+
+def test_the_database_is_opened_read_only(tmp_path):
+    user = _field(19, _field(2, b"hello there"))
+    db = tmp_path / "ro.db"
+    _antigravity_db(db, [(14, 1_792_000_000, user)])
+    before = db.read_bytes()
+    list(export.antigravity_entries(db))
+    assert db.read_bytes() == before
+
+
+def test_the_account_name_is_removed_as_a_whole_word_only():
+    out = export.redact("Get-ChildItem pytest-of-Asta and /home/asta/x but fastapi and Fastapi stay", names=["Asta"])
+    assert "Asta" not in out and "asta/" not in out
+    assert "fastapi" in out and "Fastapi" in out and out.count("[user]") == 2
