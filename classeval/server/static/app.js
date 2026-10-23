@@ -40,6 +40,14 @@
   let selectedFile = null;
   let currentEventSource = null;
 
+  // A shared link may carry the access code after the # (the address followed by #code=and the code). The part after # never goes to the
+  // server; it is moved into the field and removed from the address bar so it is not copied by accident.
+  const linkCode = new URLSearchParams(location.hash.slice(1)).get("code");
+  if (linkCode) {
+    localStorage.setItem("classeval_access_code", linkCode.trim());
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
   // Restore access code from cookie or localStorage
   const savedCode = localStorage.getItem("classeval_access_code") || getCookie("access");
   if (savedCode) {

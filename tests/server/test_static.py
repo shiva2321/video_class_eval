@@ -34,3 +34,9 @@ async def test_root_serves_index_html(app):
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "<!doctype html>" in resp.text.lower() or "<html" in resp.text.lower()
+
+
+def test_a_code_in_the_link_fragment_is_taken_over_and_removed_from_the_address_bar():
+    js = Path("classeval/server/static/app.js").read_text(encoding="utf-8")
+    assert 'new URLSearchParams(location.hash.slice(1)).get("code")' in js
+    assert "history.replaceState" in js and 'localStorage.setItem("classeval_access_code"' in js
