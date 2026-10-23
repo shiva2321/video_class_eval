@@ -8,6 +8,18 @@ It runs **entirely on your own computer**. No recording, frame, audio clip or tr
 challenge says the recordings are confidential and the children in them are identifiable. After the one-time model download it
 works offline.
 
+## Quick start
+
+```
+python scripts/install.py                                                    # once, after installing uv, ffmpeg and Ollama
+uv run python scripts/run_pipeline.py --input recording.mp4 --out results    # analyse one recording, open results/report.html
+uv run python scripts/run.py                                                 # or: the web page on http://127.0.0.1:8765
+```
+
+The challenge asked for a page that can be reached online. The author also runs one from their own computer during the
+evaluation; its address is in the submission form, it needs the access code and it is only up while that computer is on.
+Everything below works the same on your own computer, which is the supported way to use it.
+
 ## What you need
 
 | | |
@@ -60,7 +72,19 @@ on the same page. One job runs at a time, others wait. The page is only reachabl
 `--host 0.0.0.0`.
 
 Recordings of 10 minutes to 3 hours work (a shorter one gives "Insufficient evidence"). Settings are in `config.yaml`; settings
-that belong to one computer (for example another model folder) go in an untracked `config.local.yaml` merged over it.
+that belong to one computer (for example another model folder) go in an untracked `config.local.yaml` merged over it. The ones
+most worth knowing:
+
+| Setting in `config.yaml` | What it does |
+|---|---|
+| `ollama.parallel` | how many transcript chunks and picture questions are sent to the model at once (default 4) |
+| `ollama.timeout_s` | how long one model answer may take (default 900 s); raise it on a slow CPU |
+| `ollama.seed` | sampling seed of every model call |
+| `models.llm` | the Ollama model used for the checklist, the pictures and the written explanation |
+| `weights`, `cutoffs` | rubric weights and the grade boundaries on the 0-100 score |
+| `limits` | shortest and longest recording, upload size, how long finished jobs are kept |
+| `screen_state` | where the tutor's tile is (`thumb_region`), how often it is cut out and looked at |
+| `languages.full_support` | the languages for which the transcript checks are trusted |
 
 ### Share it from your own computer (optional)
 
@@ -135,6 +159,10 @@ time they speak caps the grade at Average.
 - The report quotes **only the tutor**, at most 15 words, each quote verified against the transcript, names masked. What children
   said is measured (timing, length), never quoted. A test checks that a phrase spoken by a child never reaches logs or stored files.
 - Logs contain stage names, durations and error class names, never speech.
+- The web page asks for the access code on every request and locks a client out after repeated wrong codes; it limits request
+  rates, upload size and open uploads, refuses uploads when the disk would run full, validates every identifier against path
+  tricks, sends security headers, and removes old jobs. Anyone who can reach the page and has the code can upload recordings, so
+  keep it on your own machine unless you share it on purpose.
 - The repository contains no recordings, frames, transcripts or feedback documents (`scripts/release_scan.py` checks the working tree
   and the whole git history for secrets, media, pictures, audio, e-mail addresses and listed names).
 
@@ -208,6 +236,23 @@ recordings produce many), recording length and bitrate, and any model verdict wi
 - **Model noise.** The model's verdicts change a little with its sampling seed; see the evaluation above for how much.
 - **Labels are few and noisy.** The tutors' notes are the only ground truth and mix teaching and video-quality remarks.
 
+## Troubleshooting
+
+- **`MISSING uv / ffmpeg / ollama`**: install the tool as printed, open a new terminal, run `python scripts/install.py` again.
+- **The installer says the Ollama server is not running**: start the Ollama app (or `ollama serve`). `http://127.0.0.1:11434/api/tags`
+  should answer. The model is `qwen3-vl:8b-instruct`; `ollama list` shows it.
+- **A model download hangs**: the downloader already avoids the Hugging Face fast backend, which can stall without any message, and
+  retries; run `uv run python scripts/download_models.py` again, finished files are kept.
+- **Out of GPU memory**: close other programs that use the GPU. Start with `CUDA_VISIBLE_DEVICES=-1` to run speech, voice and image
+  models on the CPU. Ollama unloads its model when a job ends.
+- **A recording gives "Insufficient evidence"**: it is shorter than 10 minutes, nearly silent, or too little of the rubric could be
+  assessed (for example another language). The report says which.
+- **The model answers slowly or times out** (typical without a GPU): raise `ollama.timeout_s`; lower `ollama.parallel` to 1 if your
+  Ollama serves one request at a time.
+- **"Too many failed attempts"**: wait five minutes, then use the code from `.env`.
+- **Port 8765 is taken**: `uv run python scripts/run.py --port 8800`.
+- **Where to look**: `logs/server.log`, `logs/worker.log` and their `.err.log` files; they never contain speech.
+
 ## What has been tested
 
 - **Windows 11, NVIDIA RTX 3060 12 GB.** A fresh clone with an empty model cache went through `python scripts/install.py` (environment from
@@ -223,9 +268,59 @@ recordings produce many), recording length and bitrate, and any model verdict wi
 - **Not covered:** recordings in other layouts than a shared screen with the tutor in the top-right corner (the tile position is the
   setting `screen_state.thumb_region`), and classes in a gallery view.
 
-## Repository
+## Reproduce the evaluation
 
-`classeval/` application (`pipeline/` stages, `server/` page and API, `eval/` metrics) · `scripts/` setup, run, evaluation and release
-tools · `tests/` · `config.yaml` all tunable settings · `docs/` design brief, plan, and the prompts used with AI coding assistants
-(`docs/ai-history/`). Work was planned and reviewed with Claude and implemented with Gemini in Antigravity under written rules
-(`GEMINI.md`); the prompts and the review notes are the interaction history.
+The recordings are confidential and are not in this repository, so the numbers above cannot be rerun here. With recordings of your
+own, sorted into folders named `excellent`, `good`, `average`, `weak` (and optionally `quality issue`, which only has to land at
+Average or below):
+
+```
+uv run python scripts/run_pipeline.py --input <recording> --out <runs>/<folder>__<id>      # e.g. <runs>/excellent__B491
+uv run python scripts/eval_loo.py --runs <runs> --truth <truth.yaml> --fixed --summary summary.json
+```
+
+`eval_loo.py` prints numbers only: exact and within-one agreement, rank correlation, the confusion matrix and, with a truth file
+(`"<folder>/<id>": {R1: true, R4: false, ...}`), agreement per dimension. Without `--fixed` it fits the boundaries leave-one-out
+instead of using `config.yaml`. `scripts/make_degraded.py` makes changed copies of a recording (muted, black, trimmed, smaller,
+joined) to check that the pipeline copes, and `scripts/summarize_run.py <run folder>` prints a numbers-only diagnostic of one run.
+
+## Tests
+
+```
+uv run python -m pytest -m "not gpu and not ollama and not e2e"                                   # fast, needs no models
+uv run python -m pytest tests/test_smoke_client.py tests/test_e2e_synthetic.py tests/test_metamorphic.py   # real models and Ollama
+```
+
+## Repository and tools
+
+`classeval/` application (`pipeline/` stages, `server/` page and API, `eval/` metrics) · `tests/` · `config.yaml` all tunable settings ·
+`results/` the numbers-only result files cited above · `docs/` design brief, plan, the prompts used with the coding assistant and a
+review log.
+
+| Script | What it is for |
+|---|---|
+| `scripts/install.py`, `download_models.py`, `selftest.py` | set up, fetch the models, prove the installation |
+| `scripts/run_pipeline.py`, `scripts/run.py` | analyse one recording; run the web page and the worker |
+| `scripts/eval_loo.py`, `summarize_run.py`, `summarize_timings.py`, `make_degraded.py` | evaluation, diagnostics, timings, changed copies |
+| `scripts/asr_bench.py`, `scripts/diar_check.py` | speech recognition and speaker separation checked against a platform transcript (`--vtt`) |
+| `scripts/smoke_public.py` | send a generated clip to a running page (local or shared) and wait for the report |
+| `scripts/release_scan.py` | checks the tree and git history for secrets, media, pictures, audio, e-mail addresses and listed names |
+| `scripts/export_ai_history.py` | turns AI session records into a redacted log (see below) |
+
+## How AI was used
+
+Claude (Claude Code) planned the work, wrote or reviewed every change and made the commits; Gemini in Antigravity wrote code and
+tests wave by wave from written prompts, under rules in `GEMINI.md` (no recordings, no commits, no network, lean scope). Each
+Gemini report was checked by reading the diff and rerunning the tests, and the defects that review found are listed in
+`docs/ai-history/REVIEW-LOG.md`; the prompts are in `docs/ai-history/prompts/`. Neither assistant was shown a recording, a frame or
+a transcript, only numbers produced by scripts.
+
+The full conversations are not stored in the repository. They are exported, with e-mail addresses, tokens, account and machine
+names removed, by
+
+```
+uv run python scripts/export_ai_history.py history.md <claude transcript>.jsonl <antigravity conversation>.db --pdf history.pdf
+```
+
+(Claude Code keeps its transcripts under `~/.claude/projects/`, Antigravity its conversations under `~/.gemini/antigravity/conversations/`;
+both are only read.) That redacted log accompanies the challenge submission.
